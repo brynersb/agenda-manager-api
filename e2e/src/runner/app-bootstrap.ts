@@ -42,6 +42,8 @@ const ENV_E2E: Record<string, string> = {
   STAGE: 'e2e',
   LOG_LEVEL: 'error',
   THROTTLE_LIMIT_PER_MINUTE: '100000',
+  // Sem proxy: o X-Forwarded-For é ignorado, salvo nas specs que testam TRUST_PROXY.
+  TRUST_PROXY: 'false',
   // Hermético: um `.env` local não pode mudar o e2e (login, bootstrap, JWT).
   JWT_SECRET: DEV_JWT_SECRET,
   JWT_ISSUER: 'pauta-mkt-api',

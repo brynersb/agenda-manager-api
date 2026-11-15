@@ -28,14 +28,17 @@ services:
         value: America/Sao_Paulo
       - key: LOG_LEVEL
         value: info
-      # A API ainda não confia no cabeçalho X-Forwarded-For (sem `trust proxy`):
-      # atrás do proxy da Render todo mundo parece ter o mesmo IP e divide o
-      # mesmo limite por IP. Enquanto isso não for corrigido no código, os
-      # limites ficam folgados (ver "Armadilhas" no guia).
-      - key: THROTTLE_LIMIT_PER_MINUTE
-        value: "600"
-      - key: LOGIN_THROTTLE_LIMIT_PER_MINUTE
-        value: "30"
+      # Quantos proxies confiáveis ficam na frente da API (ler o IP real do
+      # cliente em X-Forwarded-For: limite por IP e `refresh_tokens.ip`).
+      # A documentação da Render descreve Cloudflare + load balancer da Render
+      # mas não diz quantas entradas chegam em X-Forwarded-For; `1` é o valor
+      # seguro por padrão (nunca permite falsificar o IP). Confira com o
+      # procedimento "IP do cliente (TRUST_PROXY)" do guia de deploy e suba
+      # para `2` se o IP gravado for o da Cloudflare.
+      - key: TRUST_PROXY
+        value: "1"
+      # Limites por IP: valem os padrões da API (300 e 10 por minuto), sem
+      # THROTTLE_LIMIT_PER_MINUTE nem LOGIN_THROTTLE_LIMIT_PER_MINUTE aqui.
       - key: SWAGGER_ENABLED
         value: "false"
       # Free não tem pre-deploy: o entrypoint da imagem aplica as migrations

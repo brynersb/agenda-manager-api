@@ -4,6 +4,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 
 import type { Env } from '@/config/env.validation';
+import { parseTrustProxy } from '@/config/trust-proxy';
 import {
   buildCorsOptions,
   parseCorsOrigins,
@@ -20,6 +21,16 @@ const BODY_LIMIT = '100kb';
  */
 export function configureApp(app: NestExpressApplication): void {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
+
+  // IP real do cliente atrás de proxy reverso (`req.ip`, usado pelo throttler e
+  // pela auditoria do refresh token). Sem `TRUST_PROXY` o `X-Forwarded-For` é
+  // ignorado; o valor já foi validado em `validate`, então o parse não falha.
+  const trustProxy = parseTrustProxy(
+    config.get('TRUST_PROXY', { infer: true }),
+  );
+  if (trustProxy.ok) {
+    app.set('trust proxy', trustProxy.value);
+  }
 
   // A API roda em http local; `upgrade-insecure-requests` quebraria o Swagger UI
   // em navegadores que o aplicam também a localhost.

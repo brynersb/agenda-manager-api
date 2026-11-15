@@ -34,6 +34,7 @@ describe('validate (variáveis de ambiente)', () => {
       CORS_ORIGINS: 'http://localhost:5173',
       LOG_LEVEL: LogLevel.Info,
       THROTTLE_LIMIT_PER_MINUTE: 300,
+      TRUST_PROXY: 'false',
       SWAGGER_ENABLED: true,
       DATABASE_HOST: 'localhost',
       DATABASE_PORT: 5433,
@@ -365,6 +366,43 @@ describe('validate (variáveis de ambiente)', () => {
           validateConfig({ BOOTSTRAP_ADMIN_PASSWORD: 'troque-esta-senha-1' }),
         ).toThrow(/definidos juntos/);
       });
+    });
+  });
+
+  describe('TRUST_PROXY', () => {
+    it.each([
+      ['false'],
+      ['1'],
+      ['2'],
+      ['10.0.0.0/8,172.16.0.0/12'],
+      ['loopback'],
+    ])('aceita %j', (value) => {
+      expect(validateConfig({ TRUST_PROXY: value }).TRUST_PROXY).toBe(value);
+    });
+
+    it('converte número e normaliza ausente ou vazio para false', () => {
+      expect(validateConfig({ TRUST_PROXY: 1 }).TRUST_PROXY).toBe('1');
+      expect(validateConfig({ TRUST_PROXY: '' }).TRUST_PROXY).toBe('false');
+      expect(validateConfig({}).TRUST_PROXY).toBe('false');
+    });
+
+    it('recusa true puro com mensagem clara em pt-BR', () => {
+      expect(() => validateConfig({ TRUST_PROXY: 'true' })).toThrow(
+        /TRUST_PROXY não aceita "true".*falsificar o IP/,
+      );
+    });
+
+    it.each([
+      ['11'],
+      ['-1'],
+      ['abc'],
+      ['10.0.0.0/33'],
+      ['0.0.0.0/0'],
+      ['10.0.0.1,true'],
+    ])('recusa %j', (value) => {
+      expect(() => validateConfig({ TRUST_PROXY: value })).toThrow(
+        /Configuração de ambiente inválida:[\s\S]*TRUST_PROXY/,
+      );
     });
   });
 });

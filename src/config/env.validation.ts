@@ -7,6 +7,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsString,
   Matches,
   Max,
   MaxLength,
@@ -17,6 +18,7 @@ import {
 } from 'class-validator';
 
 import { DURATION_PATTERN } from '@/config/duration';
+import { parseTrustProxy } from '@/config/trust-proxy';
 import { DATABASE_LOCAL_DEFAULTS } from '@/database/database-defaults';
 
 export enum NodeEnv {
@@ -131,6 +133,20 @@ export class EnvironmentVariables {
   @IsInt()
   @Min(1)
   THROTTLE_LIMIT_PER_MINUTE: number = 300;
+
+  /**
+   * Quantos proxies reversos confiáveis ficam na frente da API, para o Express
+   * ler o IP real do cliente em `X-Forwarded-For` (limite por IP, auditoria do
+   * refresh token). `false` (padrão: ignora o cabeçalho), inteiro de saltos
+   * (`1`, `2`...) ou lista de IPs/sub-redes separados por vírgula. `true` puro
+   * é recusado: deixaria o cliente falsificar o IP. Interpretado por
+   * `parseTrustProxy` (config/trust-proxy.ts).
+   */
+  @Transform(({ obj }) =>
+    isBlank(obj.TRUST_PROXY) ? 'false' : String(obj.TRUST_PROXY).trim(),
+  )
+  @IsString()
+  TRUST_PROXY: string = 'false';
 
   @Transform(({ obj }) => toBoolean(obj.SWAGGER_ENABLED, true))
   @IsBoolean()
@@ -308,6 +324,11 @@ export function validate(config: Record<string, unknown>): Env {
     (error) =>
       ` - ${error.property}: ${[...new Set(Object.values(error.constraints ?? {}))].join('; ')}`,
   );
+
+  const trustProxy = parseTrustProxy(validated.TRUST_PROXY);
+  if (!trustProxy.ok) {
+    details.push(` - ${trustProxy.message}`);
+  }
 
   // Trava de segurança: o segredo de desenvolvimento nunca vale fora de local/e2e.
   if (

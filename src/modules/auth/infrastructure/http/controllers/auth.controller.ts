@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 import {
   Body,
   Controller,
@@ -97,11 +99,16 @@ const RESPONSE_400_BODY = {
   },
 };
 
-/** IP e user-agent da requisição, guardados com o refresh token. */
+/**
+ * IP e user-agent da requisição, guardados com o refresh token. O IP só vale
+ * se for um endereço de verdade: com `TRUST_PROXY` mal calibrado o Express
+ * pode devolver texto arbitrário vindo do `X-Forwarded-For`, que não deve
+ * chegar ao banco (coluna `varchar(45)`).
+ */
 function sessionContextOf(request: Request): SessionContext {
   const userAgent = request.headers['user-agent'];
   return {
-    ip: request.ip ?? null,
+    ip: request.ip && isIP(request.ip) !== 0 ? request.ip : null,
     userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX_LENGTH) : null,
   };
 }
