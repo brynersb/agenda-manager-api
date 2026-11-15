@@ -29,10 +29,15 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=build /app/dist ./dist
+# Entrypoint: aplica as migrations (RUN_MIGRATIONS=true) e só então sobe a API.
+COPY --chmod=755 docker-entrypoint.sh ./docker-entrypoint.sh
+# Execução sem privilégios (o usuário `node` já existe na imagem oficial).
 USER node
 EXPOSE 3000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD node -e "require('http').get(\`http://localhost:\${process.env.PORT ?? 3000}/health\`, (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+# start-period folga para as migrations da primeira subida (Neon acordando).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "require('http').get(\`http://127.0.0.1:\${process.env.PORT ?? 3000}/health\`, (r) => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))"
 
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "dist/main"]

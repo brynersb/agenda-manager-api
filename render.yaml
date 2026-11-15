@@ -1,0 +1,75 @@
+# Blueprint da Render para a API (plano free). Guia completo, com o passo a passo
+# para o dono, em pauta-mkt-planning/docs/deploy-nuvem-gratuita.md.
+#
+# Variáveis `sync: false`: a Render pergunta o valor só na CRIAÇÃO do Blueprint;
+# depois, mude-as pelo painel (Environment). Nada de segredo neste arquivo.
+services:
+  - type: web
+    name: pauta-mkt-api
+    runtime: docker
+    plan: free
+    # Escolha a região mais próxima do banco Neon (a região da Render não muda depois).
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Sem `target`: vale o último estágio do Dockerfile (`production`).
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # `STAGE` só aceita local | e2e | demo; `demo` é o modo de stack completa
+      # (exige CORS_ORIGINS e JWT_SECRET). Não existe valor "production".
+      - key: STAGE
+        value: demo
+      # PORT não é definida aqui: a Render injeta a porta (a API e o healthcheck da
+      # imagem leem `PORT`).
+      - key: APP_TIMEZONE
+        value: America/Sao_Paulo
+      - key: LOG_LEVEL
+        value: info
+      # A API ainda não confia no cabeçalho X-Forwarded-For (sem `trust proxy`):
+      # atrás do proxy da Render todo mundo parece ter o mesmo IP e divide o
+      # mesmo limite por IP. Enquanto isso não for corrigido no código, os
+      # limites ficam folgados (ver "Armadilhas" no guia).
+      - key: THROTTLE_LIMIT_PER_MINUTE
+        value: "600"
+      - key: LOGIN_THROTTLE_LIMIT_PER_MINUTE
+        value: "30"
+      - key: SWAGGER_ENABLED
+        value: "false"
+      # Free não tem pre-deploy: o entrypoint da imagem aplica as migrations
+      # antes de subir a API e derruba o contêiner se alguma falhar.
+      - key: RUN_MIGRATIONS
+        value: "true"
+      # Banco (Neon). TLS é obrigatório no Neon.
+      - key: DATABASE_SSL
+        value: "true"
+      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+        value: "true"
+      - key: DATABASE_POOL_MAX
+        value: "5"
+      - key: DATABASE_HOST # host do endpoint (pooled ou direto: ver o guia)
+        sync: false
+      - key: MIGRATION_DATABASE_HOST # host do endpoint DIRETO, sem `-pooler`
+        sync: false
+      - key: DATABASE_PORT
+        value: "5432"
+      - key: DATABASE_USER
+        sync: false
+      - key: DATABASE_PASS
+        sync: false
+      - key: DATABASE_NAME
+        sync: false
+      # Autenticação. A Render gera um segredo aleatório de 256 bits (base64,
+      # 44 caracteres) na criação; trocá-lo invalida os access tokens vigentes.
+      - key: JWT_SECRET
+        generateValue: true
+      # URL do Cloudflare Pages, sem barra final (ex.: https://pauta-mkt.pages.dev).
+      - key: CORS_ORIGINS
+        sync: false
+      # Administrador inicial: só é criado se a tabela de usuários estiver vazia.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
