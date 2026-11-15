@@ -1,0 +1,69 @@
+# Infraestrutura local da API. Perfis:
+#   db   -> Postgres de desenvolvimento (porta 5433 do host; a 5432 da máquina
+#           costuma estar ocupada por outro serviço)
+#   auth -> Keycloak (porta 8080), realm `bora` importado de keycloak/realm-bora.json.
+#           Só desenvolvimento local. A stack completa da demonstração fica no
+#           repositório da UI (T14).
+#
+# O Postgres usa as mesmas variáveis DATABASE_* da API (padrões locais abaixo:
+# pauta/pauta/pauta, porta 5433). Para ler o `.env` da raiz:
+#   docker compose --env-file .env -f docker/compose.yaml --profile db up -d
+# Sem `.env`, valem os padrões:
+#   docker compose -f docker/compose.yaml --profile db up -d
+name: pauta-mkt-api
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: pauta-mkt-postgres
+    profiles: ["db"]
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-pauta}
+      POSTGRES_USER: ${DATABASE_USER:-pauta}
+      # Credencial só para uso local; nunca reaproveitar fora daqui.
+      POSTGRES_PASSWORD: ${DATABASE_PASS:-pauta}
+    ports:
+      - "${DATABASE_PORT:-5433}:5432"
+    volumes:
+      # Postgres 18+ guarda os dados num subdiretório versionado de /var/lib/postgresql.
+      - pauta-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${DATABASE_USER:-pauta} -d ${DATABASE_NAME:-pauta}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    # Versão fixada por tag exata. SOMENTE DESENVOLVIMENTO LOCAL (start-dev, admin/admin).
+    image: quay.io/keycloak/keycloak:26.8.2
+    container_name: pauta-mkt-keycloak
+    profiles: ["auth"]
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      # A importação só acontece se o realm ainda não existir no volume.
+      - ./keycloak/realm-bora.json:/opt/keycloak/data/import/realm-bora.json:ro
+      - pauta-keycloak-data:/opt/keycloak/data
+    healthcheck:
+      # A imagem não tem curl; o /health/ready fica na porta de gerenciamento (9000).
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/localhost/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
+volumes:
+  pauta-postgres-data:
+  pauta-keycloak-data:
