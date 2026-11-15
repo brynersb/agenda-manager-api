@@ -24,7 +24,7 @@ export class OwnerEntity {
   email: string | null;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
-  keycloakUserId: string | null;
+  userId: string | null;
 
   @Column({ type: 'boolean', default: true })
   active: boolean;

@@ -1,13 +1,14 @@
 /**
- * Papéis do realm Keycloak que a API reconhece (ADR-003). O prefixo `pauta-`
- * evita colisão num Keycloak compartilhado; não existe papel de administrador.
+ * Papéis do sistema. Cada usuário tem exatamente um. A decisão de acesso nunca
+ * vem do token: o servidor deriva as permissões do papel (`ROLE_PERMISSIONS`).
  */
 export enum Role {
+  Admin = 'admin',
   Editor = 'content-brief-editor',
   Viewer = 'content-brief-viewer',
 }
 
-/** Papéis conhecidos, para filtrar a claim do token e validar configuração. */
+/** Papéis conhecidos, para validar claim do token, DTOs e configuração. */
 export const KNOWN_ROLES: readonly string[] = Object.values(Role);
 
 export function isRole(value: unknown): value is Role {

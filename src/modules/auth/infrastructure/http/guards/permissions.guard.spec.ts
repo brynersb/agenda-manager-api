@@ -34,6 +34,12 @@ class WithPermissions {
 
   @Public()
   publicRoute() {}
+
+  @Permissions(Permission.UserRead)
+  listUsers() {}
+
+  @Permissions(Permission.UserWrite)
+  writeUsers() {}
 }
 
 @Permissions(Permission.RegistryRead)
@@ -59,24 +65,22 @@ function context(
   } as unknown as ExecutionContext;
 }
 
-function user(roles: Role[], permissions: Permission[]): AuthenticatedUser {
-  return { sub: 'u-1', name: 'Maria', email: 'm@x.test', roles, permissions };
+function user(role: Role, permissions: Permission[]): AuthenticatedUser {
+  return { id: 'u-1', name: 'Maria', email: 'm@x.test', role, permissions };
 }
 
-const editor = user(
-  [Role.Editor],
-  [
-    Permission.ContentBriefRead,
-    Permission.ContentBriefWrite,
-    Permission.ContentBriefDelete,
-    Permission.RegistryRead,
-    Permission.RegistryWrite,
-  ],
-);
-const viewer = user(
-  [Role.Viewer],
-  [Permission.ContentBriefRead, Permission.RegistryRead],
-);
+const editor = user(Role.Editor, [
+  Permission.ContentBriefRead,
+  Permission.ContentBriefWrite,
+  Permission.ContentBriefDelete,
+  Permission.RegistryRead,
+  Permission.RegistryWrite,
+]);
+const viewer = user(Role.Viewer, [
+  Permission.ContentBriefRead,
+  Permission.RegistryRead,
+]);
+const admin = user(Role.Admin, Object.values(Permission));
 
 describe('PermissionsGuard', () => {
   const logger = {
@@ -131,12 +135,27 @@ describe('PermissionsGuard', () => {
     );
   });
 
-  it('@Authenticated deixa passar qualquer usuário autenticado, inclusive sem papel', () => {
-    const noRole = user([], []);
+  it('@Authenticated deixa passar qualquer usuário autenticado, mesmo sem permissão nenhuma', () => {
+    const noPermission = user(Role.Viewer, []);
 
     expect(
-      guard.canActivate(context(WithPermissions, 'onlyAuthenticated', noRole)),
+      guard.canActivate(
+        context(WithPermissions, 'onlyAuthenticated', noPermission),
+      ),
     ).toBe(true);
+  });
+
+  it('só o admin passa em rotas user:read e user:write', () => {
+    for (const method of ['listUsers', 'writeUsers']) {
+      expect(guard.canActivate(context(WithPermissions, method, admin))).toBe(
+        true,
+      );
+      for (const other of [editor, viewer]) {
+        expect(() =>
+          guard.canActivate(context(WithPermissions, method, other)),
+        ).toThrow(ForbiddenAccessError);
+      }
+    }
   });
 
   it('@Authenticated sem usuário resulta em 401', () => {
@@ -193,7 +212,11 @@ describe('PermissionsGuard', () => {
     ).toBe(true);
     expect(() =>
       guard.canActivate(
-        context(ControllerWithClassPermission, 'handler', user([], [])),
+        context(
+          ControllerWithClassPermission,
+          'handler',
+          user(Role.Viewer, []),
+        ),
       ),
     ).toThrow(ForbiddenAccessError);
   });

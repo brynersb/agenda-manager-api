@@ -1,4 +1,10 @@
-import { LogLevel, NodeEnv, Stage, validate } from '@/config/env.validation';
+import {
+  DEV_JWT_SECRET,
+  LogLevel,
+  NodeEnv,
+  Stage,
+  validate,
+} from '@/config/env.validation';
 
 const DATABASE = {
   DATABASE_HOST: 'db',
@@ -8,14 +14,12 @@ const DATABASE = {
   DATABASE_NAME: 'pauta',
   DATABASE_SSL: 'false',
 };
-const OIDC = {
-  OIDC_ISSUER_URL: 'http://localhost:8080/realms/bora',
-  OIDC_AUDIENCE: 'pauta-mkt-api',
-};
+/** Segredo de teste (placeholder de 40 caracteres), exigido fora de local/e2e. */
+const JWT_SECRET = 'segredo-de-teste-com-mais-de-32-caracteres';
 
-/** `validate` com a configuração OIDC mínima, para os testes alheios à auth. */
+/** `validate` com o segredo JWT, para os testes alheios à auth (STAGE=demo o exige). */
 function validateConfig(config: Record<string, unknown>) {
-  return validate({ ...OIDC, ...config });
+  return validate({ JWT_SECRET, ...config });
 }
 
 describe('validate (variáveis de ambiente)', () => {
@@ -217,100 +221,150 @@ describe('validate (variáveis de ambiente)', () => {
       );
     });
   });
-  describe('autenticação', () => {
+  describe('autenticação própria', () => {
     const DEMO_BASE = {
       STAGE: 'demo',
       CORS_ORIGINS: 'http://localhost:8081',
       ...DATABASE,
     };
 
-    it('aplica os padrões de OIDC_ROLES_CLAIM, AUTH_MOCK_ENABLED e AUTH_MOCK_ROLE', () => {
-      const env = validateConfig({});
+    it('aplica os padrões de JWT, bloqueio de login e throttle', () => {
+      const env = validate({});
 
       expect(env).toMatchObject({
-        OIDC_ISSUER_URL: 'http://localhost:8080/realms/bora',
-        OIDC_AUDIENCE: 'pauta-mkt-api',
-        OIDC_ROLES_CLAIM: 'realm_access.roles',
-        AUTH_MOCK_ENABLED: false,
-        AUTH_MOCK_ROLE: 'content-brief-editor',
+        JWT_SECRET: DEV_JWT_SECRET,
+        JWT_ISSUER: 'pauta-mkt-api',
+        JWT_AUDIENCE: 'pauta-mkt',
+        JWT_ACCESS_TTL: '15m',
+        JWT_REFRESH_TTL: '7d',
+        LOGIN_MAX_ATTEMPTS: 5,
+        LOGIN_LOCK_MINUTES: 15,
+        LOGIN_THROTTLE_LIMIT_PER_MINUTE: 10,
       });
+      expect(env.BOOTSTRAP_ADMIN_EMAIL).toBeUndefined();
+      expect(env.BOOTSTRAP_ADMIN_PASSWORD).toBeUndefined();
     });
 
-    it('recusa subir em local sem OIDC_ISSUER_URL e sem mock', () => {
-      expect(() => validate({})).toThrow(/OIDC_ISSUER_URL/);
-      expect(() => validate({ OIDC_ISSUER_URL: OIDC.OIDC_ISSUER_URL })).toThrow(
-        /OIDC_AUDIENCE/,
+    it('o segredo de desenvolvimento só vale em local e e2e', () => {
+      expect(validate({ STAGE: 'local' }).JWT_SECRET).toBe(DEV_JWT_SECRET);
+      expect(validate({ STAGE: 'e2e', ...DATABASE }).JWT_SECRET).toBe(
+        DEV_JWT_SECRET,
       );
     });
 
-    it('dispensa OIDC em local com AUTH_MOCK_ENABLED=true', () => {
-      const env = validate({ AUTH_MOCK_ENABLED: 'true' });
-
-      expect(env.AUTH_MOCK_ENABLED).toBe(true);
-    });
-
-    it('dispensa OIDC em e2e', () => {
-      expect(() => validate({ STAGE: 'e2e', ...DATABASE })).not.toThrow();
-    });
-
-    it('STAGE=demo sem OIDC_ISSUER_URL impede o boot', () => {
-      expect(() =>
-        validate({ ...DEMO_BASE, OIDC_AUDIENCE: 'pauta-mkt-api' }),
-      ).toThrow(/OIDC_ISSUER_URL/);
-    });
-
-    it('STAGE=demo sem OIDC_AUDIENCE impede o boot', () => {
-      expect(() =>
-        validate({ ...DEMO_BASE, OIDC_ISSUER_URL: OIDC.OIDC_ISSUER_URL }),
-      ).toThrow(/OIDC_AUDIENCE/);
-    });
-
-    it('STAGE=demo com AUTH_MOCK_ENABLED=true impede o boot, mesmo com OIDC', () => {
-      expect(() =>
-        validate({ ...DEMO_BASE, ...OIDC, AUTH_MOCK_ENABLED: 'true' }),
-      ).toThrow(/AUTH_MOCK_ENABLED/);
-    });
-
-    it('STAGE=e2e com AUTH_MOCK_ENABLED=true impede o boot', () => {
-      expect(() =>
-        validate({
-          STAGE: 'e2e',
-          ...DATABASE,
-          AUTH_MOCK_ENABLED: 'true',
-        }),
-      ).toThrow(/AUTH_MOCK_ENABLED/);
-    });
-
-    it('STAGE=demo com OIDC completo e mock desligado sobe', () => {
-      const env = validate({
-        ...DEMO_BASE,
-        ...OIDC,
-        AUTH_MOCK_ENABLED: 'false',
-      });
-
-      expect(env.AUTH_MOCK_ENABLED).toBe(false);
-    });
-
-    it('recusa OIDC_ISSUER_URL que não é http(s) e AUTH_MOCK_ROLE desconhecido', () => {
-      expect(() => validateConfig({ OIDC_ISSUER_URL: 'keycloak' })).toThrow(
-        /OIDC_ISSUER_URL/,
-      );
-      expect(() => validateConfig({ AUTH_MOCK_ROLE: 'admin' })).toThrow(
-        /AUTH_MOCK_ROLE/,
+    it('STAGE=demo sem JWT_SECRET impede o boot', () => {
+      expect(() => validate(DEMO_BASE)).toThrow(/JWT_SECRET/);
+      expect(() => validate({ ...DEMO_BASE, JWT_SECRET: '' })).toThrow(
+        /JWT_SECRET/,
       );
     });
 
-    it('aceita OIDC_JWKS_URI e papel de mock leitor', () => {
+    it('recusa o segredo de desenvolvimento declarado explicitamente fora de local/e2e', () => {
+      expect(() =>
+        validate({ ...DEMO_BASE, JWT_SECRET: DEV_JWT_SECRET }),
+      ).toThrow(/segredo de desenvolvimento/);
+    });
+
+    it('recusa JWT_SECRET com menos de 32 caracteres em qualquer STAGE', () => {
+      expect(() => validate({ JWT_SECRET: 'curto' })).toThrow(/JWT_SECRET/);
+      expect(() =>
+        validate({ ...DEMO_BASE, JWT_SECRET: 'x'.repeat(31) }),
+      ).toThrow(/JWT_SECRET/);
+    });
+
+    it('STAGE=demo com JWT_SECRET de 32+ caracteres sobe', () => {
+      const env = validate({ ...DEMO_BASE, JWT_SECRET });
+
+      expect(env.JWT_SECRET).toBe(JWT_SECRET);
+    });
+
+    it('aceita TTLs, limites e iss/aud informados', () => {
       const env = validateConfig({
-        OIDC_JWKS_URI:
-          'http://keycloak:8080/realms/bora/protocol/openid-connect/certs',
-        AUTH_MOCK_ROLE: 'content-brief-viewer',
+        JWT_ISSUER: 'outro-iss',
+        JWT_AUDIENCE: 'outra-aud',
+        JWT_ACCESS_TTL: '30m',
+        JWT_REFRESH_TTL: '14d',
+        LOGIN_MAX_ATTEMPTS: '3',
+        LOGIN_LOCK_MINUTES: '30',
+        LOGIN_THROTTLE_LIMIT_PER_MINUTE: '5',
       });
 
-      expect(env.AUTH_MOCK_ROLE).toBe('content-brief-viewer');
-      expect(() => validateConfig({ OIDC_JWKS_URI: 'ftp://x' })).toThrow(
-        /OIDC_JWKS_URI/,
+      expect(env).toMatchObject({
+        JWT_ISSUER: 'outro-iss',
+        JWT_AUDIENCE: 'outra-aud',
+        JWT_ACCESS_TTL: '30m',
+        JWT_REFRESH_TTL: '14d',
+        LOGIN_MAX_ATTEMPTS: 3,
+        LOGIN_LOCK_MINUTES: 30,
+        LOGIN_THROTTLE_LIMIT_PER_MINUTE: 5,
+      });
+    });
+
+    it.each([
+      { JWT_ACCESS_TTL: '15' },
+      { JWT_ACCESS_TTL: '0m' },
+      { JWT_REFRESH_TTL: '7 dias' },
+      { LOGIN_MAX_ATTEMPTS: '0' },
+      { LOGIN_LOCK_MINUTES: '0' },
+      { LOGIN_THROTTLE_LIMIT_PER_MINUTE: '0' },
+      { JWT_ISSUER: '' },
+    ])('recusa valor inválido %o', (config) => {
+      expect(() => validateConfig(config)).toThrow(
+        /Configuração de ambiente inválida/,
       );
+    });
+
+    it('o erro de configuração nunca ecoa o valor do segredo', () => {
+      expect(() => validate({ JWT_SECRET: 'segredo-curto' })).toThrow(
+        expect.objectContaining({
+          message: expect.not.stringContaining('segredo-curto'),
+        }),
+      );
+    });
+
+    describe('administrador inicial', () => {
+      it('aceita e-mail e senha válidos', () => {
+        const env = validateConfig({
+          BOOTSTRAP_ADMIN_EMAIL: 'admin@pauta.local',
+          BOOTSTRAP_ADMIN_PASSWORD: 'troque-esta-senha-1',
+        });
+
+        expect(env.BOOTSTRAP_ADMIN_EMAIL).toBe('admin@pauta.local');
+        expect(env.BOOTSTRAP_ADMIN_PASSWORD).toBe('troque-esta-senha-1');
+      });
+
+      it('trata as duas variáveis vazias como não definidas', () => {
+        expect(() =>
+          validateConfig({
+            BOOTSTRAP_ADMIN_EMAIL: '',
+            BOOTSTRAP_ADMIN_PASSWORD: '',
+          }),
+        ).not.toThrow();
+      });
+
+      it('valida o formato só quando definidas', () => {
+        expect(() =>
+          validateConfig({
+            BOOTSTRAP_ADMIN_EMAIL: 'sem-arroba',
+            BOOTSTRAP_ADMIN_PASSWORD: 'troque-esta-senha-1',
+          }),
+        ).toThrow(/BOOTSTRAP_ADMIN_EMAIL/);
+        expect(() =>
+          validateConfig({
+            BOOTSTRAP_ADMIN_EMAIL: 'admin@pauta.local',
+            BOOTSTRAP_ADMIN_PASSWORD: 'curta',
+          }),
+        ).toThrow(/BOOTSTRAP_ADMIN_PASSWORD/);
+      });
+
+      it('exige as duas juntas ou nenhuma', () => {
+        expect(() =>
+          validateConfig({ BOOTSTRAP_ADMIN_EMAIL: 'admin@pauta.local' }),
+        ).toThrow(/definidos juntos/);
+        expect(() =>
+          validateConfig({ BOOTSTRAP_ADMIN_PASSWORD: 'troque-esta-senha-1' }),
+        ).toThrow(/definidos juntos/);
+      });
     });
   });
 });

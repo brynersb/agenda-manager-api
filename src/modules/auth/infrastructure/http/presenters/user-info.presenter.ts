@@ -1,12 +1,28 @@
-import type { UserInfo } from '@/modules/auth/application/queries/get-user-info/get-user-info.query.interface';
+import type {
+  AuthSession,
+  UserInfo,
+} from '@/modules/auth/application/types/auth-session';
+import type { AuthSessionResponseDto } from '@/modules/auth/infrastructure/http/dtos/auth-session.response.dto';
 import type { UserInfoResponseDto } from '@/modules/auth/infrastructure/http/dtos/user-info.response.dto';
 
 export function toUserInfoResponse(info: UserInfo): UserInfoResponseDto {
   return {
-    sub: info.sub,
-    name: info.name,
+    id: info.id,
     email: info.email,
-    roles: info.roles,
+    name: info.name,
+    role: info.role,
     permissions: info.permissions,
+  };
+}
+
+export function toAuthSessionResponse(
+  session: AuthSession,
+): AuthSessionResponseDto {
+  return {
+    accessToken: session.accessToken,
+    refreshToken: session.refreshToken,
+    expiresIn: session.expiresIn,
+    mustChangePassword: session.mustChangePassword,
+    user: toUserInfoResponse(session.user),
   };
 }

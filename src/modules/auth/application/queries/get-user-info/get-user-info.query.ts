@@ -1,25 +1,22 @@
+import type { UserInfo } from '@/modules/auth/application/types/auth-session';
 import type { AuthenticatedUser } from '@/modules/auth/application/types/authenticated-user';
-import { permissionsOfRoles } from '@/modules/auth/application/types/role-permissions.map';
-import type {
-  GetUserInfoQueryInterface,
-  UserInfo,
-} from './get-user-info.query.interface';
+import { permissionsOfRole } from '@/modules/auth/domain/services/role-permissions';
+import type { GetUserInfoQueryInterface } from './get-user-info.query.interface';
 
 /**
  * Identidade e permissões do usuário autenticado: a fonte única de permissões
- * do front (ADR-003). As permissões saem do mapa papel -> permissão, nunca do
- * que veio no token.
+ * do front (ADR-003). Lê só o que o `AuthGuard` já resolveu das claims do
+ * token, sem ir ao banco; as permissões saem do mapa papel -> permissão, nunca
+ * do que veio no objeto.
  */
 export class GetUserInfoQuery implements GetUserInfoQueryInterface {
   execute(user: AuthenticatedUser): UserInfo {
     return {
-      sub: user.sub,
-      // O contrato exige `nome` textual; sem claim de nome, cai no e-mail e,
-      // por fim, no identificador.
-      name: user.name ?? user.email ?? user.sub,
+      id: user.id,
       email: user.email,
-      roles: [...user.roles],
-      permissions: permissionsOfRoles(user.roles),
+      name: user.name,
+      role: user.role,
+      permissions: permissionsOfRole(user.role),
     };
   }
 }

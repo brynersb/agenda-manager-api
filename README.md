@@ -1,6 +1,6 @@
 # Pauta de marketing Bora: API
 
-API da pauta de marketing (POC local): pautas, empreendimentos e responsáveis. Já estão prontos a fundação (configuração, logs, erros, paginação, Swagger, health, persistência com Postgres, relógio de domínio e harness e2e), a autenticação, os cadastros de empreendimentos e responsáveis e a escrita das pautas (criar, editar, trocar status, excluir e detalhar por id), a listagem com filtros, o resumo e o seed de exemplos.
+API da pauta de marketing (POC local): pautas, empreendimentos, responsáveis e usuários. Já estão prontos a fundação (configuração, logs, erros, paginação, Swagger, health, persistência com Postgres, relógio de domínio e harness e2e), a autenticação própria (login por e-mail e senha, JWT, refresh com rotação) e a administração de usuários ([`docs/auth.md`](./docs/auth.md)), os cadastros de empreendimentos e responsáveis e a escrita das pautas (criar, editar, trocar status, excluir e detalhar por id), a listagem com filtros, o resumo e o seed de exemplos.
 
 ## Stack
 
@@ -21,8 +21,11 @@ npm ci
 cp .env.example .env            # opcional: os padrões já servem para `local`
 docker compose -f docker/compose.yaml --profile db up -d   # Postgres em localhost:5433
 npm run migration:run           # aplica as migrations pendentes
+npm run seed:dev                # usuários dev.*@pauta.local + dados de exemplo (só local/demo)
 npm run start:dev               # API em http://localhost:3000
 ```
+
+Para entrar: `POST /api/v1/auth/login` com `dev.admin@pauta.local`, `dev.editor@pauta.local` ou `dev.leitor@pauta.local` e a **senha só de desenvolvimento** `dev-only-pauta-2026` (pública, criada pelo `seed:dev`; nunca use fora de uma máquina de desenvolvimento; `SEED_DEV_PASSWORD` a troca). Sem seed, defina `BOOTSTRAP_ADMIN_EMAIL` e `BOOTSTRAP_ADMIN_PASSWORD` para a API criar o administrador inicial na primeira subida. Passo a passo e exemplos em [`docs/auth.md`](./docs/auth.md).
 
 - `GET http://localhost:3000/health` (fora do prefixo `/api`, sem versão)
 - Swagger: `http://localhost:3000/docs`
@@ -34,30 +37,35 @@ O Postgres do `compose` publica a porta **5433** do host (a 5432 costuma estar o
 
 Validadas na subida (`src/config/env.validation.ts`); a API recusa iniciar com valor inválido.
 
-| Variável                           | Padrão                                             | Descrição                                                                                                                           |
-| ---------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                         | `development`                                      | `development`, `test` ou `production`                                                                                               |
-| `STAGE`                            | `local`                                            | `local`, `e2e` ou `demo` (`demo` = stack completa da demonstração). Em `local` o log é colorido; nos demais, JSON                   |
-| `PORT`                             | `3000`                                             | Porta HTTP (1 a 65535)                                                                                                              |
-| `APP_TIMEZONE`                     | `America/Sao_Paulo`                                | Fuso IANA usado para calcular "hoje" (validado com `Intl.supportedValuesOf('timeZone')`, mais `UTC`)                                |
-| `CORS_ORIGINS`                     | `http://localhost:5173`                            | Origens permitidas, separadas por vírgula. O padrão só vale em `local`/`e2e`; **obrigatória** em `demo`                             |
-| `LOG_LEVEL`                        | `info`                                             | `error`, `warn`, `info` ou `debug`                                                                                                  |
-| `THROTTLE_LIMIT_PER_MINUTE`        | `300`                                              | Limite de requisições por minuto, por IP                                                                                            |
-| `SWAGGER_ENABLED`                  | `true`                                             | Publica o Swagger em `/docs` (fica ligado também em `demo`)                                                                         |
-| `DATABASE_HOST`                    | `localhost`                                        | Host do Postgres. O padrão só vale em `local`; **obrigatória** nos demais `STAGE`                                                   |
-| `DATABASE_PORT`                    | `5433`                                             | Porta do Postgres (1 a 65535). Mesma regra de obrigatoriedade                                                                       |
-| `DATABASE_USER`                    | `pauta`                                            | Usuário do Postgres. Mesma regra de obrigatoriedade                                                                                 |
-| `DATABASE_PASS`                    | `pauta`                                            | Senha do Postgres. Mesma regra de obrigatoriedade                                                                                   |
-| `DATABASE_NAME`                    | `pauta`                                            | Nome do banco. Mesma regra de obrigatoriedade                                                                                       |
-| `DATABASE_SSL`                     | `false`                                            | `true` liga TLS na conexão (Neon/produção); `false` no Postgres local. Só aceita `true` ou `false`; **obrigatória** fora de `local` |
-| `DATABASE_SSL_REJECT_UNAUTHORIZED` | `true`                                             | Com `DATABASE_SSL=true`, valida o certificado do servidor                                                                           |
-| `DATABASE_POOL_MAX`                | `10`                                               | Máximo de conexões do pool                                                                                                          |
-| `OIDC_ISSUER_URL`                  | (sem padrão)                                       | Issuer do Keycloak (`http://localhost:8080/realms/bora`). **Obrigatória**, exceto com `STAGE=e2e` ou `STAGE=local` com mock         |
-| `OIDC_AUDIENCE`                    | (sem padrão)                                       | CSV de audiences aceitas (`pauta-mkt-api`); o `aud` do token precisa conter alguma. Mesma regra de obrigatoriedade                  |
-| `OIDC_JWKS_URI`                    | `${OIDC_ISSUER_URL}/protocol/openid-connect/certs` | Endereço das chaves públicas, quando difere do padrão do Keycloak                                                                   |
-| `OIDC_ROLES_CLAIM`                 | `realm_access.roles`                               | Claim (caminho com ponto) com os papéis do usuário                                                                                  |
-| `AUTH_MOCK_ENABLED`                | `false`                                            | Liga o usuário mock sem Keycloak. `true` com `STAGE` diferente de `local` **impede a API de subir**                                 |
-| `AUTH_MOCK_ROLE`                   | `content-brief-editor`                             | Papel do usuário mock (`content-brief-editor` ou `content-brief-viewer`)                                                            |
+| Variável                           | Padrão                                       | Descrição                                                                                                                                                                                     |
+| ---------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                         | `development`                                | `development`, `test` ou `production`                                                                                                                                                         |
+| `STAGE`                            | `local`                                      | `local`, `e2e` ou `demo` (`demo` = stack completa da demonstração). Em `local` o log é colorido; nos demais, JSON                                                                             |
+| `PORT`                             | `3000`                                       | Porta HTTP (1 a 65535)                                                                                                                                                                        |
+| `APP_TIMEZONE`                     | `America/Sao_Paulo`                          | Fuso IANA usado para calcular "hoje" (validado com `Intl.supportedValuesOf('timeZone')`, mais `UTC`)                                                                                          |
+| `CORS_ORIGINS`                     | `http://localhost:5173`                      | Origens permitidas, separadas por vírgula. O padrão só vale em `local`/`e2e`; **obrigatória** em `demo`                                                                                       |
+| `LOG_LEVEL`                        | `info`                                       | `error`, `warn`, `info` ou `debug`                                                                                                                                                            |
+| `THROTTLE_LIMIT_PER_MINUTE`        | `300`                                        | Limite de requisições por minuto, por IP                                                                                                                                                      |
+| `SWAGGER_ENABLED`                  | `true`                                       | Publica o Swagger em `/docs` (fica ligado também em `demo`)                                                                                                                                   |
+| `DATABASE_HOST`                    | `localhost`                                  | Host do Postgres. O padrão só vale em `local`; **obrigatória** nos demais `STAGE`                                                                                                             |
+| `DATABASE_PORT`                    | `5433`                                       | Porta do Postgres (1 a 65535). Mesma regra de obrigatoriedade                                                                                                                                 |
+| `DATABASE_USER`                    | `pauta`                                      | Usuário do Postgres. Mesma regra de obrigatoriedade                                                                                                                                           |
+| `DATABASE_PASS`                    | `pauta`                                      | Senha do Postgres. Mesma regra de obrigatoriedade                                                                                                                                             |
+| `DATABASE_NAME`                    | `pauta`                                      | Nome do banco. Mesma regra de obrigatoriedade                                                                                                                                                 |
+| `DATABASE_SSL`                     | `false`                                      | `true` liga TLS na conexão (Neon/produção); `false` no Postgres local. Só aceita `true` ou `false`; **obrigatória** fora de `local`                                                           |
+| `DATABASE_SSL_REJECT_UNAUTHORIZED` | `true`                                       | Com `DATABASE_SSL=true`, valida o certificado do servidor                                                                                                                                     |
+| `DATABASE_POOL_MAX`                | `10`                                         | Máximo de conexões do pool                                                                                                                                                                    |
+| `JWT_SECRET`                       | (padrão de desenvolvimento em `local`/`e2e`) | Segredo HMAC dos access tokens (HS256), mínimo de 32 caracteres. **Obrigatório** fora de `local`/`e2e`; o padrão de desenvolvimento é recusado fora deles. Gere com `openssl rand -base64 48` |
+| `JWT_ISSUER`                       | `pauta-mkt-api`                              | `iss` fixo do access token                                                                                                                                                                    |
+| `JWT_AUDIENCE`                     | `pauta-mkt`                                  | `aud` fixo do access token                                                                                                                                                                    |
+| `JWT_ACCESS_TTL`                   | `15m`                                        | Validade do access token (inteiro + `s`, `m`, `h` ou `d`)                                                                                                                                     |
+| `JWT_REFRESH_TTL`                  | `7d`                                         | Validade do refresh token (mesmo formato)                                                                                                                                                     |
+| `LOGIN_MAX_ATTEMPTS`               | `5`                                          | Falhas de senha seguidas que bloqueiam a conta                                                                                                                                                |
+| `LOGIN_LOCK_MINUTES`               | `15`                                         | Minutos de bloqueio da conta                                                                                                                                                                  |
+| `LOGIN_THROTTLE_LIMIT_PER_MINUTE`  | `10`                                         | Limite de requisições por minuto, por IP, em `POST /auth/login` e `POST /auth/change-password` (além do `THROTTLE_LIMIT_PER_MINUTE`)                                                          |
+| `BOOTSTRAP_ADMIN_EMAIL`            | (sem padrão)                                 | E-mail do administrador inicial. Só tem efeito se **não existir nenhum usuário**; as duas `BOOTSTRAP_*` juntas ou nenhuma                                                                     |
+| `BOOTSTRAP_ADMIN_PASSWORD`         | (sem padrão)                                 | Senha do administrador inicial (10 a 128 caracteres). Ele nasce com troca de senha obrigatória. Nunca vai para o log                                                                          |
+| `SEED_DEV_PASSWORD`                | `dev-only-pauta-2026`                        | Só do `npm run seed:dev`: senha dos usuários `dev.*@pauta.local` (lida direto do ambiente, não validada na subida da API)                                                                     |
 
 ## Scripts
 
@@ -102,6 +110,24 @@ Definidos nesta base:
 | `TOO_MANY_REQUESTS` | 429                                   | Limite de requisições por minuto excedido                                      |
 | `INTERNAL_ERROR`    | 5xx                                   | Falha inesperada (mensagem genérica; o detalhe fica no log)                    |
 
+Autenticação e usuários (catálogo e exemplos de resposta em [`docs/auth.md`](./docs/auth.md)):
+
+| `code`                     | Status | Quando                                                                             |
+| -------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| `INVALID_CREDENTIALS`      | 401    | E-mail inexistente **ou** senha errada (mesma resposta e mesmo tempo)              |
+| `ACCOUNT_LOCKED`           | 403    | Conta bloqueada por excesso de tentativas de login                                 |
+| `USER_DEACTIVATED`         | 403    | Usuário desativado tentou entrar (depois de provar a senha) ou renovar a sessão    |
+| `INVALID_REFRESH_TOKEN`    | 401    | Refresh token desconhecido, expirado, revogado ou reutilizado                      |
+| `INVALID_CURRENT_PASSWORD` | 400    | Senha atual incorreta na troca de senha                                            |
+| `WEAK_PASSWORD`            | 400    | Senha fora de 10 a 128 caracteres, ou nova senha igual à atual                     |
+| `INVALID_USER_NAME`        | 400    | Nome do usuário vazio ou com mais de 120 caracteres                                |
+| `INVALID_EMAIL`            | 400    | E-mail do usuário (e do responsável) fora do formato ou com mais de 254 caracteres |
+| `USER_NOT_FOUND`           | 404    | Id de usuário inexistente                                                          |
+| `EMAIL_ALREADY_REGISTERED` | 409    | Já existe usuário com o mesmo e-mail (sem diferenciar caixa), ativo ou desativado  |
+| `USER_VERSION_OUTDATED`    | 409    | `version` do `PATCH /users/:id` diferente da atual                                 |
+| `LAST_ADMIN`               | 409    | A operação deixaria o sistema sem administrador ativo                              |
+| `CANNOT_MODIFY_SELF`       | 409    | Desativar ou mudar o papel da própria conta                                        |
+
 Cadastros (empreendimentos e responsáveis):
 
 | `code`                                                           | Status | Quando                                                                                                                      |
@@ -128,53 +154,55 @@ Pautas:
 
 ## Autenticação e permissões
 
-Toda rota exige `Authorization: Bearer <access token>` do Keycloak (realm `bora`), exceto `GET /health`. O front envia o **access token**, nunca o id token.
+Autenticação **própria** da API (ADR-016, substitui o provedor de identidade externo da primeira versão): usuários e senhas ficam no Postgres, a API emite o access token (JWT HS256) e um refresh token opaco. Toda rota exige `Authorization: Bearer <access token>`, exceto `GET /health`, `POST /auth/login` e `POST /auth/refresh`. **Contrato completo, exemplos JSON, erros e fluxo de tokens para quem constrói a UI: [`docs/auth.md`](./docs/auth.md).**
 
-- **Validação** (`OidcTokenService`): RS256, `iss` igual a `OIDC_ISSUER_URL`, `aud` contendo algum valor de `OIDC_AUDIENCE`, `exp` (tolerância de 30 s). Chaves públicas por JWKS, em cache de 10 min. Sem Cognito, API key nem Basic.
-- **Papéis:** só `content-brief-editor` e `content-brief-viewer` (não existe admin). Vêm da claim `OIDC_ROLES_CLAIM`; papéis que não sejam `content-brief-*` conhecidos são ignorados.
-- **Mapa papel -> permissão** (`src/modules/auth/application/types/role-permissions.map.ts`, travado por spec):
+- **Endpoints** (`/api/v1`): `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout`, `POST /auth/change-password`, `GET /auth/user-info`, e a administração em `/users` (ver abaixo).
+- **Access token:** JWT HS256, TTL `JWT_ACCESS_TTL` (15 min), claims `sub` (uuid), `email`, `name`, `role`, `iss`, `aud`. As permissões **não** vão no token: o servidor as deriva do `role`.
+- **Refresh token:** 256 bits aleatórios (base64url), gravado só como hash SHA-256 em `refresh_tokens`; vale 7 dias e **uma única vez** (rotação a cada uso). Apresentar um refresh já usado revoga toda a família de sessões. Trocar ou redefinir a senha revoga todos os refresh tokens do usuário.
+- **Papéis** (um por usuário): `admin`, `content-brief-editor`, `content-brief-viewer`. Mapa papel -> permissão (`src/modules/auth/domain/services/role-permissions.ts`, travado por spec):
 
-| Permissão                                              | `content-brief-editor` | `content-brief-viewer` |
-| ------------------------------------------------------ | :--------------------: | :--------------------: |
-| `content-brief:read`                                   |          sim           |          sim           |
-| `content-brief:write` (criar, editar, mudar status)    |          sim           |                        |
-| `content-brief:delete`                                 |          sim           |                        |
-| `registry:read`                                        |          sim           |          sim           |
-| `registry:write` (criar, renomear, arquivar, reativar) |          sim           |                        |
+| Permissão                                              | `admin` | `content-brief-editor` | `content-brief-viewer` |
+| ------------------------------------------------------ | :-----: | :--------------------: | :--------------------: |
+| `content-brief:read`                                   |   sim   |          sim           |          sim           |
+| `content-brief:write` (criar, editar, mudar status)    |   sim   |          sim           |                        |
+| `content-brief:delete`                                 |   sim   |          sim           |                        |
+| `registry:read`                                        |   sim   |          sim           |          sim           |
+| `registry:write` (criar, renomear, arquivar, reativar) |   sim   |          sim           |                        |
+| `user:read`                                            |   sim   |                        |                        |
+| `user:write` (criar, alterar, desativar, redefinir)    |   sim   |                        |                        |
 
-- **Guards** (`APP_GUARD`, nesta ordem): `ThrottlerGuard` -> `AuthGuard` -> `PermissionsGuard`. Falha de autenticação: `401 UNAUTHENTICATED`, sempre a mesma mensagem; o motivo (`reason`: `token_missing`, `invalid_format`, `invalid_signature`, `expired`, `invalid_issuer`, `invalid_audience`, `jwks_unavailable`) vai só para o log `auth.guard.rejected`, nunca o token. Falta de permissão: `403 FORBIDDEN`.
-- **Nega por padrão:** toda rota declara `@Public()` (só `/health`), `@Authenticated()` (só exige login) ou `@Permissions(...)` (exige todas). Rota sem nenhum dos três responde `403` e gera o log `auth.permissions.missing_decorator`.
-- **`GET /api/v1/auth/user-info`** devolve `{ sub, name, email, roles, permissions }`: é a fonte única de permissões do front. Usuário autenticado sem papel `content-brief-*` recebe `200` com `roles: []` e `permissions: []`.
-- **Usuário mock** (desenvolvimento sem Keycloak): `STAGE=local` **e** `AUTH_MOCK_ENABLED=true`; o papel vem de `AUTH_MOCK_ROLE` e o boot registra o aviso `auth.mock_used`. Com qualquer outro `STAGE` a API se recusa a subir.
-- **Teste manual com o Keycloak local** (`docker/compose.yaml`, perfil `auth`):
+- **Guards** (`APP_GUARD`, nesta ordem): `ThrottlerGuard` -> `AuthGuard` -> `PermissionsGuard`. O `AuthGuard` valida o JWT **localmente** (assinatura HS256, `iss`, `aud`, `exp`) e carrega o usuário das claims, **sem consultar o banco por requisição**. Consequência: desativar um usuário ou mudar o papel dele só vale nos tokens novos, no máximo `JWT_ACCESS_TTL` (15 min) depois; o refresh e o login são negados na hora. Falha de autenticação: `401 UNAUTHENTICATED`, sempre a mesma mensagem; o motivo (`reason`: `token_missing`, `invalid_format`, `invalid_signature`, `expired`, `invalid_issuer`, `invalid_audience`, `invalid_claims`) vai só para o log `auth.guard.rejected`, nunca o token. Falta de permissão: `403 FORBIDDEN`.
+- **Nega por padrão:** toda rota declara `@Public()` (`/health`, login e refresh), `@Authenticated()` (só exige login) ou `@Permissions(...)` (exige todas). Rota sem nenhum dos três responde `403` e gera o log `auth.permissions.missing_decorator`.
+- **Segurança do login:** `INVALID_CREDENTIALS` único para e-mail inexistente e senha errada, com equalização de tempo (hash descartável quando o e-mail não existe); `LOGIN_MAX_ATTEMPTS` falhas seguidas bloqueiam a conta por `LOGIN_LOCK_MINUTES` (contagem atômica no banco, sucesso zera); `@LoginThrottle()` aplica `LOGIN_THROTTLE_LIMIT_PER_MINUTE` por IP em login e troca de senha; senha em argon2id (`argon2`, OWASP 19 MiB / 2 iterações / 1 de paralelismo); senha, hash e token nunca vão para log nem para resposta (as respostas que carregam segredo levam `Cache-Control: no-store`).
+- **Teste manual** (com `npm run seed:dev` e a API no ar):
 
 ```bash
-TOKEN=$(curl -s -d 'grant_type=password&client_id=pauta-mkt-dev-cli&username=dev.editor&password=dev' \
-  http://localhost:8080/realms/bora/protocol/openid-connect/token | jq -r .access_token)
+LOGIN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"dev.editor@pauta.local","password":"dev-only-pauta-2026"}')
+TOKEN=$(echo "$LOGIN" | jq -r .accessToken)
 curl -H "Authorization: Bearer $TOKEN" http://localhost:3000/api/v1/auth/user-info
 ```
 
-## Keycloak (login local)
+### Administração de usuários (`/api/v1/users`)
 
-Keycloak só para **desenvolvimento local** (não é uma configuração para ambiente real: usuários de teste com senha `dev`, `sslRequired: none`, admin `admin`/`admin`).
+`user:read` para leitura, `user:write` para escrita (só o `admin`). Detalhes e exemplos em [`docs/auth.md`](./docs/auth.md).
 
-```bash
-docker compose -f docker/compose.yaml --profile auth up -d                  # só o Keycloak
-docker compose -f docker/compose.yaml --profile db --profile auth up -d     # Postgres (5433) + Keycloak
-```
+| Rota                             | O que faz                                                                                                                                                            |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /users`                     | Lista paginada (`{ data, total, page, limit }`), ordenada por nome. Filtros: `q` (nome ou e-mail, sem caixa e sem acento), `status` (`ACTIVE`/`DEACTIVATED`)         |
+| `GET /users/:id`                 | Detalha um usuário                                                                                                                                                   |
+| `POST /users`                    | Cria `{ name, email, role, password? }`. Sem `password`, gera senha provisória forte, devolvida **uma única vez** (`temporaryPassword`); `mustChangePassword = true` |
+| `PATCH /users/:id`               | Altera `{ name?, role?, version }` (concorrência otimista; 409 se a versão mudou)                                                                                    |
+| `POST /users/:id/deactivate`     | Desativa e revoga as sessões (idempotente)                                                                                                                           |
+| `POST /users/:id/reactivate`     | Reativa e destrava (idempotente)                                                                                                                                     |
+| `POST /users/:id/reset-password` | Gera nova senha provisória (única vez), exige troca, destrava a conta e revoga as sessões                                                                            |
 
-- URL: `http://localhost:8080`. Imagem `quay.io/keycloak/keycloak:26.8.2`.
-- Realm `bora`, importado de `docker/keycloak/realm-bora.json` na primeira subida. Console em `http://localhost:8080/admin` (`admin`/`admin`).
-- Usuários de teste (senha `dev`):
+Regras: não pode desativar nem mudar o papel da **própria** conta (`CANNOT_MODIFY_SELF`); não pode desativar nem rebaixar o **último admin ativo** (`LAST_ADMIN`, garantido também no banco contra requisições simultâneas); e-mail único sem diferenciar caixa, inclusive entre desativados (`EMAIL_ALREADY_REGISTERED`); senha de 10 a 128 caracteres (`WEAK_PASSWORD`). Nenhuma resposta traz hash nem token.
 
-| Usuário         | Papel                  |
-| --------------- | ---------------------- |
-| `dev.editor`    | `content-brief-editor` |
-| `dev.leitor`    | `content-brief-viewer` |
-| `dev.sem-papel` | nenhum                 |
+### Administrador inicial (bootstrap) e usuários de desenvolvimento
 
-- Clients: `pauta-mkt-ui` (público, Authorization Code + PKCE) é o do front; `pauta-mkt-dev-cli` (Direct Access Grants) existe só para obter token por `curl`, como no exemplo da seção "Autenticação e permissões".
-- Como zerar o realm, exportá-lo, resolver o "HTTPS required" do console e decodificar um token: [`docs/runbook-keycloak-local.md`](./docs/runbook-keycloak-local.md).
+- **Bootstrap:** ao subir, se **não existe nenhum usuário** e `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD` estão definidas, a API cria o admin com `mustChangePassword = true`. É idempotente (com qualquer usuário na tabela, não faz nada) e registra só o e-mail. Sem usuários e sem as variáveis, a API sobe e registra um aviso claro (`user.bootstrap_admin`, `reason: not_configured`).
+- **Seed de desenvolvimento** (`npm run seed:dev`, só `STAGE=local` ou `demo`; recusa produção e `e2e`): cria `dev.admin@pauta.local`, `dev.editor@pauta.local` e `dev.leitor@pauta.local` com a **senha só de desenvolvimento** `dev-only-pauta-2026` (pública; `SEED_DEV_PASSWORD` a sobrescreve) e `mustChangePassword = false`. Idempotente; não altera a senha de quem já existe.
 
 ## Cadastros: empreendimentos e responsáveis
 
@@ -266,7 +294,7 @@ type ContentBriefResponse = {
 - **Status livre** entre os quatro valores. Entrar em `DONE` grava `completedAt` (instante do relógio); sair limpa; repetir `DONE` mantém o instante original.
 - **Concorrência otimista** (ADR-006): `PUT` e `PATCH .../status` exigem a `version` lida; o `UPDATE ... WHERE id AND version AND deleted_at IS NULL` garante a checagem também em corrida (sem linha afetada, recarrega para separar `404` de `409 CONTENT_BRIEF_VERSION_OUTDATED`). Excluir não exige `version`.
 - **Exclusão lógica:** `DELETE` grava `deleted_at`/`deleted_by`; a pauta passa a responder `404` em todas as rotas e deixa de contar em `openContentBriefs`.
-- **Auditoria:** `createdBy`/`updatedBy` vêm do token (`sub` e `name`, snapshot).
+- **Auditoria:** `createdBy`/`updatedBy` vêm do token (`sub`, o uuid do usuário, e `name`, snapshot).
 - **Logs:** `content_brief.created|updated|status_changed|deleted` (`outcome: success`) e `content_brief.version_conflict` (`warn`, `blocked`, com `operation`), sempre com `content_brief_id` e `user_sub`. Título e descrição nunca são logados.
 
 ### Listagem e resumo (`GET /content-briefs`, `GET /content-briefs/summary`)
@@ -312,10 +340,11 @@ curl -H "Authorization: Bearer $TOKEN" 'http://localhost:3000/api/v1/content-bri
 
 ### Seed de desenvolvimento
 
-`npm run seed:dev` (compila e roda `dist/database/seeds/run-seed.js`; recusa `STAGE=e2e`) cria os empreendimentos "Residencial Exemplo" e "Comercial Exemplo", os responsáveis "Ana" e "Bruno" e as 6 pautas do array `EXEMPLOS` do protótipo (textos em português, enums em inglês), com prazos relativos a "hoje" no fuso `APP_TIMEZONE`, de modo que a tela mostre as seis situações: atrasada (−2), hoje (0), próximos 7 dias (+2), mais adiante (+9), sem prazo e concluída (−4). Dois prazos diferem do protótipo, que não tinha pauta para hoje nem sem prazo: o pagamento da agência vence hoje (era +5) e o acompanhamento de leads do Google Ads fica sem prazo (era +14).
+`npm run seed:dev` (compila e roda `dist/database/seeds/run-seed.js`; só roda com `STAGE=local` ou `demo`, recusa produção e `e2e`) cria antes os três usuários de desenvolvimento (seção "Autenticação e permissões") e então os empreendimentos "Residencial Exemplo" e "Comercial Exemplo", os responsáveis "Ana" e "Bruno" e as 6 pautas do array `EXEMPLOS` do protótipo (textos em português, enums em inglês), com prazos relativos a "hoje" no fuso `APP_TIMEZONE`, de modo que a tela mostre as seis situações: atrasada (−2), hoje (0), próximos 7 dias (+2), mais adiante (+9), sem prazo e concluída (−4). Dois prazos diferem do protótipo, que não tinha pauta para hoje nem sem prazo: o pagamento da agência vence hoje (era +5) e o acompanhamento de leads do Google Ads fica sem prazo (era +14).
 
 - **Idempotente:** cadastros por nome normalizado (`ON CONFLICT`); a pauta de exemplo não é recriada se já existe uma não excluída do autor `seed` com o mesmo título. Rodar duas vezes não duplica (coberto no e2e). Os prazos não "andam" numa segunda rodada em outro dia: para renovar, apague o seed e rode de novo.
 - Autor da auditoria: `{ id: 'seed', name: 'Seed de desenvolvimento' }`.
+- As pautas e os cadastros novos gravam em `created_by`/`updated_by` o **uuid do usuário** (o `id` do `users`), e o nome é um snapshot.
 - O banco de desenvolvimento fica **sem pautas** até alguém rodar o seed. Para desfazê-lo: `DELETE FROM content_briefs WHERE created_by = 'seed'` e o mesmo em `owners` e `estate_developments` (nessa ordem).
 
 ### Carga e desempenho (5 mil pautas)
@@ -323,15 +352,14 @@ curl -H "Authorization: Bearer $TOKEN" 'http://localhost:3000/api/v1/content-bri
 `npm run load:seed` (`scripts/seed-load.ts`) apaga e recria uma carga sintética (30 empreendimentos, 15 responsáveis, **5.000 pautas** com prazos de 60 dias atrás a 90 à frente, 8% sem prazo, status 30% `TODO`, 25% `IN_PROGRESS`, 10% `IN_REVIEW`, 35% `DONE`; gerador determinístico) e `npm run load:clean` a apaga. Tudo que o script grava tem `created_by = 'load-test'`, e só isso é apagado. **Recusa qualquer banco que não seja local** (`localhost`, `127.0.0.1`, `::1`). `npm run load:measure` (`scripts/measure-load.ts`, só `fetch`) mede cada consulta com 200 requisições (concorrência 8, 10 de aquecimento) e sai com erro se algum p95 passar de `TARGET_MS` (padrão 300):
 
 ```bash
-npm run build && STAGE=local OIDC_ISSUER_URL=http://localhost:8080/realms/bora OIDC_AUDIENCE=pauta-mkt-api \
-  THROTTLE_LIMIT_PER_MINUTE=1000000 LOG_LEVEL=warn node dist/main.js &
-npm run load:seed
-TOKEN=$(curl -s -d 'grant_type=password&client_id=pauta-mkt-dev-cli&username=dev.editor&password=dev' \
-  http://localhost:8080/realms/bora/protocol/openid-connect/token | jq -r .access_token) npm run load:measure
+npm run build && STAGE=local THROTTLE_LIMIT_PER_MINUTE=1000000 LOG_LEVEL=warn node dist/main.js &
+npm run seed:dev && npm run load:seed
+TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"dev.editor@pauta.local","password":"dev-only-pauta-2026"}' | jq -r .accessToken) npm run load:measure
 npm run load:clean
 ```
 
-Medição de 14/11/2026 (máquina de desenvolvimento, Postgres 18 em contêiner na porta 5433, API compilada, JWT real do Keycloak validado a cada chamada, 5.000 pautas). Meta do plano técnico (§8): **p95 < 300 ms**.
+Medição de 14/11/2026 (máquina de desenvolvimento, Postgres 18 em contêiner na porta 5433, API compilada, JWT real validado a cada chamada, 5.000 pautas; medição anterior ao ADR-016, quando a validação era por chave pública remota (o HS256 atual é local e mais barato)). Meta do plano técnico (§8): **p95 < 300 ms**.
 
 | Consulta                                                                                     | média (ms) |  p50 |      p95 |  p99 |
 | -------------------------------------------------------------------------------------------- | ---------: | ---: | -------: | ---: |
@@ -351,8 +379,9 @@ Todos com folga de mais de 5x sobre a meta, então **nenhum índice novo foi cri
 - A primeira migration cria `unaccent`, a função `immutable_unaccent(text)` (o `unaccent` puro não é `IMMUTABLE` e não serve em índice) e a colação ICU `pt_br`.
 - A segunda (`CreateEstateDevelopmentsAndOwners`) cria `estate_developments` e `owners`, com índice único em `normalized_name` (`ux_estate_developments_name`, `ux_owners_name`). `normalized_name` é `varchar(240)` (o `name` é `varchar(80)`) porque a decomposição Unicode pode alongar o texto. A lista de cadastros ordena por `name COLLATE "pt_br"`.
 - A terceira (`CreateContentBriefs`) cria os enums `content_brief_status`, `content_brief_action`, `content_brief_channel` e a tabela `content_briefs` (índices parciais `ix_content_briefs_*`, só pautas não excluídas).
+- A quarta e a quinta (`CreateUsers`, `CreateRefreshTokens`, ADR-016) criam os enums `user_role` e `user_status`, `users` (índice único `ux_users_email` sobre `lower(email)`) e `refresh_tokens` (`ux_refresh_tokens_token_hash` único, `ix_refresh_tokens_family_id`, `ix_refresh_tokens_user_id`). A sexta (`RenameOwnerUserIdColumn`) renomeia a coluna de vínculo externo de `owners` para `user_id` (vínculo opcional com `users`, sem FK, sem uso no MVP). Essas três são **migrations novas**: as anteriores não foram reescritas.
 - **Renomeação ADR-015 (feita uma única vez):** por ser uma POC sem dado real e sem migration aplicada fora da máquina de desenvolvimento, as migrations `CreateCadastros` e `CreatePautas` foram reescritas no lugar com nomes em inglês (hoje `CreateEstateDevelopmentsAndOwners` e `CreateContentBriefs`) e o banco de desenvolvimento foi recriado. A partir daqui, migration aplicada não se edita.
-- Seeds: `src/database/seeds/` (lista em `seeds.ts`; hoje só `prototype-examples.seed.ts`), idempotentes; `npm run seed:dev` recusa `STAGE=e2e`. Detalhes na seção "Seed de desenvolvimento".
+- Seeds: `src/database/seeds/` (lista em `seeds.ts`: `dev-users.seed.ts` e `prototype-examples.seed.ts`), idempotentes; `npm run seed:dev` só roda com `STAGE=local` ou `demo`. Detalhes na seção "Seed de desenvolvimento".
 
 ### Relógio e datas
 
@@ -367,7 +396,7 @@ docker compose -f docker/compose.yaml --profile db up -d
 E2E_DATABASE_HOST=localhost E2E_DATABASE_PORT=5433 E2E_DATABASE_USER=pauta E2E_DATABASE_PASS=pauta E2E_DATABASE_NAME=pauta npm run test:e2e
 ```
 
-Atenção: os specs executam `cleanDatabase()` (`TRUNCATE` das tabelas de negócio) em `beforeEach`; com `E2E_DATABASE_HOST`, use um banco que possa ser apagado. A auth é hermética (ADR-009): o bootstrap troca `OIDC_TOKEN_SERVICE` pelo `E2eOidcTokenService` (`e2e/src/runner/`), que só conhece `TOKENS.editor`, `TOKENS.viewer` e `TOKENS.noRole` (`e2e/src/core/tokens.ts`; passe-os em `client.get(url, { token })`); nenhum Keycloak participa. `bootstrapApp({ env, providers, today })` (`e2e/src/runner/app-bootstrap.ts`) aceita variáveis de ambiente, `overrideProvider` e o dia do relógio fixo (padrão `2026-11-14`; `e2e.clock.setToday(...)` muda por spec).
+Atenção: os specs executam `cleanDatabase()` (`TRUNCATE` das tabelas de negócio) em `beforeEach`; com `E2E_DATABASE_HOST`, use um banco que possa ser apagado. A auth é a real e hermética (ADR-009, ADR-016): JWT HS256 com o segredo de desenvolvimento e argon2id. O `bootstrapApp` preenche `TOKENS.admin|editor|viewer|unknownRole` (`e2e/src/core/tokens.ts`) com access tokens emitidos pelo `TokenService` da aplicação (passe-os em `client.get(url, { token })`; o `sub` deles não existe em `users`, o guard não consulta o banco) e `forgeAccessToken(...)` fabrica tokens expirados, adulterados ou de outro segredo. Para fluxos com usuário real (login, refresh, bloqueio, administração) use `createUser(e2e, ...)` e `loginAs(e2e, user)` de `e2e/src/core/users.ts`. `e2e.clock.advanceMinutes(n)` avança o relógio dentro do dia (fim do bloqueio de login). `bootstrapApp({ env, providers, today })` (`e2e/src/runner/app-bootstrap.ts`) aceita variáveis de ambiente, `overrideProvider` e o dia do relógio fixo (padrão `2026-11-14`; `e2e.clock.setToday(...)` muda por spec).
 
 ## Estrutura
 
@@ -378,10 +407,11 @@ src/
 ├── database/                               # DatabaseModule, typeorm.config (Nest + CLI), migrations, seeds
 ├── shared/
 │   ├── domain/                             # DomainEntity, ValueObject, DomainError, Actor, CalendarDate, RegistryName, Audit
-│   ├── application/interfaces/             # interfaces compartilhadas (logger, clock)
-│   ├── infrastructure/{logger,filters,http,persistence,clock}
+│   ├── application/interfaces/             # interfaces compartilhadas (logger, clock, password hasher)
+│   ├── infrastructure/{logger,filters,http,persistence,clock,security}
 │   └── utils/
-├── modules/auth/                           # guards, decorators, OidcTokenService, mapa de permissões, /auth/user-info
+├── modules/auth/                           # login, refresh, logout, troca de senha, guards, decorators, TokenService, mapa papel -> permissão, /auth/*
+├── modules/user/                           # usuários e refresh_tokens: domínio, administração (/users), bootstrap do admin
 ├── modules/estate-development/             # cadastro de empreendimentos (domain, application, infrastructure)
 ├── modules/owner/                          # cadastro de responsáveis (idem, com e-mail)
 ├── modules/content-brief/                  # pautas: domínio, interfaces, use cases/queries, persistência e controller (escrita, lista, resumo, GET por id)
@@ -389,6 +419,7 @@ src/
 e2e/                                        # globalSetup (Testcontainers), bootstrap do Nest, cliente HTTP e specs
 scripts/                                    # carga sintética (seed-load.ts) e medição de latência (measure-load.ts)
 docker/compose.yaml                         # Postgres local (perfil `db`)
+docs/auth.md                                # contrato de autenticação e de /users (base da UI)
 ```
 
 ## Docker
@@ -398,7 +429,7 @@ docker build -t pauta-mkt-api .             # imagem de produção (Node 26.13.1
 docker run --rm -p 3000:3000 pauta-mkt-api
 ```
 
-O `Dockerfile` tem os estágios `base`, `development`, `build` e `production`; o `HEALTHCHECK` consulta `/health`. A stack completa da demonstração (API + UI + Keycloak + Postgres) fica no repositório da UI.
+O `Dockerfile` tem os estágios `base`, `development`, `build` e `production`; o `HEALTHCHECK` consulta `/health`. A stack completa da demonstração (API + UI + Postgres) fica no repositório da UI; na demo (`STAGE=demo`) a API exige `JWT_SECRET` e `CORS_ORIGINS`, e o `npm run seed:dev` cria os usuários `dev.*@pauta.local`.
 
 ## Convenções
 

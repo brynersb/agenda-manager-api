@@ -20,7 +20,7 @@ function existing(active: boolean) {
     id: 'e-1',
     name: RegistryName.create('Bela Vista'),
     email: null,
-    keycloakUserId: null,
+    userId: null,
     active,
     version: 5,
     audit: newAudit({ id: 'u-1', name: 'Ana' }, new Date()),

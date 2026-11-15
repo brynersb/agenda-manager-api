@@ -1,60 +1,51 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwksClient } from 'jwks-rsa';
 
+import { parseDurationToSeconds } from '@/config/duration';
 import type { Env } from '@/config/env.validation';
-import { OIDC_TOKEN_SERVICE } from '@/modules/auth/application/interfaces/token-verifier.interface';
+import { TOKEN_SERVICE } from '@/modules/auth/application/interfaces/token.service.interface';
+import { ChangePasswordProvider } from '@/modules/auth/application/providers/change-password.provider';
 import { GetUserInfoProvider } from '@/modules/auth/application/providers/get-user-info.provider';
+import { LoginProvider } from '@/modules/auth/application/providers/login.provider';
+import { LogoutProvider } from '@/modules/auth/application/providers/logout.provider';
+import { RefreshTokenProvider } from '@/modules/auth/application/providers/refresh-token.provider';
 import { AuthController } from '@/modules/auth/infrastructure/http/controllers/auth.controller';
-import { OidcTokenService } from '@/modules/auth/infrastructure/services/oidc-token.service';
-
-/** Cache das chaves públicas do Keycloak (ADR-003). */
-const JWKS_CACHE_MS = 10 * 60 * 1000;
-const JWKS_REQUESTS_PER_MINUTE = 10;
-
-function csv(value: string | undefined): string[] {
-  return (value ?? '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
+import { TokenService } from '@/modules/auth/infrastructure/services/token.service';
+import { UserModule } from '@/modules/user/user.module';
 
 /**
- * Autenticação e autorização. Os guards (`AuthGuard`, `PermissionsGuard`) são
- * registrados como `APP_GUARD` no `AppModule`, depois do `ThrottlerGuard`, e
- * dependem do `OIDC_TOKEN_SERVICE` exportado aqui.
+ * Autenticação própria (ADR-016): login, refresh com rotação, logout, troca de
+ * senha e `user-info`. Importa o `UserModule` para ler e gravar usuários e
+ * refresh tokens pelas portas dele. Os guards (`AuthGuard`, `PermissionsGuard`)
+ * são registrados como `APP_GUARD` no `AppModule`, depois do `ThrottlerGuard`, e
+ * dependem do `TOKEN_SERVICE` exportado aqui.
  */
 @Module({
+  imports: [UserModule],
   controllers: [AuthController],
   providers: [
     {
-      provide: OIDC_TOKEN_SERVICE,
+      provide: TOKEN_SERVICE,
       inject: [ConfigService],
-      useFactory: (config: ConfigService<Env, true>) => {
-        const issuer = (
-          config.get('OIDC_ISSUER_URL', { infer: true }) ?? ''
-        ).replace(/\/+$/, '');
-        const jwksUri =
-          config.get('OIDC_JWKS_URI', { infer: true }) ||
-          `${issuer}/protocol/openid-connect/certs`;
-        return new OidcTokenService(
-          {
-            issuer,
-            audiences: csv(config.get('OIDC_AUDIENCE', { infer: true })),
-            rolesClaim: config.get('OIDC_ROLES_CLAIM', { infer: true }),
-          },
-          new JwksClient({
-            jwksUri,
-            cache: true,
-            cacheMaxAge: JWKS_CACHE_MS,
-            rateLimit: true,
-            jwksRequestsPerMinute: JWKS_REQUESTS_PER_MINUTE,
-          }),
-        );
-      },
+      useFactory: (config: ConfigService<Env, true>) =>
+        new TokenService({
+          secret: config.get('JWT_SECRET', { infer: true }),
+          issuer: config.get('JWT_ISSUER', { infer: true }),
+          audience: config.get('JWT_AUDIENCE', { infer: true }),
+          accessTtlSeconds: parseDurationToSeconds(
+            config.get('JWT_ACCESS_TTL', { infer: true }),
+          ),
+          refreshTtlSeconds: parseDurationToSeconds(
+            config.get('JWT_REFRESH_TTL', { infer: true }),
+          ),
+        }),
     },
     GetUserInfoProvider,
+    LoginProvider,
+    RefreshTokenProvider,
+    LogoutProvider,
+    ChangePasswordProvider,
   ],
-  exports: [OIDC_TOKEN_SERVICE],
+  exports: [TOKEN_SERVICE],
 })
 export class AuthModule {}

@@ -91,11 +91,11 @@ describe('Empreendimentos (e2e)', () => {
       expect((await findAll()).body).toHaveLength(1);
     });
 
-    it('usuário sem papel recebe 403 até na leitura', async () => {
-      const res = await findAll('', TOKENS.noRole);
+    it('token com papel desconhecido recebe 401 até na leitura', async () => {
+      const res = await findAll('', TOKENS.unknownRole);
 
-      expect(res.status).toBe(403);
-      expect((res.body as unknown as ErrorBody).code).toBe('FORBIDDEN');
+      expect(res.status).toBe(401);
+      expect((res.body as unknown as ErrorBody).code).toBe('UNAUTHENTICATED');
     });
   });
 

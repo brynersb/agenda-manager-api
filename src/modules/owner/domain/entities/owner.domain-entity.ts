@@ -11,7 +11,7 @@ export type OwnerSnapshot = {
   id: string;
   name: RegistryName;
   email: Email | null;
-  keycloakUserId: string | null;
+  userId: string | null;
   active: boolean;
   version: number;
   audit: Audit;
@@ -22,15 +22,15 @@ export type OwnerSnapshot = {
  * nome da lista padrão, mas as pautas existentes continuam mostrando-o.
  *
  * `version` é a versão lida do banco (concorrência otimista, ADR-006); quem a
- * incrementa é a persistência ao gravar. `keycloakUserId` é o vínculo opcional
- * com um usuário do Keycloak: sem uso no MVP, só persiste.
+ * incrementa é a persistência ao gravar. `userId` é o vínculo opcional
+ * com um usuário do sistema (`users`): sem uso no MVP, só persiste (sem FK).
  */
 export class OwnerDomainEntity extends DomainEntity {
   private constructor(
     id: string,
     private _name: RegistryName,
     private _email: Email | null,
-    private readonly _keycloakUserId: string | null,
+    private readonly _userId: string | null,
     private _active: boolean,
     private readonly _version: number,
     private _audit: Audit,
@@ -61,7 +61,7 @@ export class OwnerDomainEntity extends DomainEntity {
       snapshot.id,
       snapshot.name,
       snapshot.email,
-      snapshot.keycloakUserId,
+      snapshot.userId,
       snapshot.active,
       snapshot.version,
       snapshot.audit,
@@ -105,8 +105,8 @@ export class OwnerDomainEntity extends DomainEntity {
     return this._email;
   }
 
-  get keycloakUserId(): string | null {
-    return this._keycloakUserId;
+  get userId(): string | null {
+    return this._userId;
   }
 
   get active(): boolean {

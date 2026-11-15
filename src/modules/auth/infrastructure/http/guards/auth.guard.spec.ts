@@ -1,12 +1,10 @@
 import type { ExecutionContext } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 
-import type { Env } from '@/config/env.validation';
 import type {
-  TokenVerifierInterface,
-  VerificationResult,
-} from '@/modules/auth/application/interfaces/token-verifier.interface';
+  TokenFailureReason,
+  TokenServiceInterface,
+} from '@/modules/auth/application/interfaces/token.service.interface';
 import { Role } from '@/modules/auth/domain/enums/role';
 import { UnauthenticatedError } from '@/modules/auth/domain/errors/auth.errors';
 import { Public } from '@/modules/auth/infrastructure/http/decorators/public.decorator';
@@ -39,14 +37,9 @@ function context(
   return { ctx, request };
 }
 
-function createConfig(values: Partial<Record<keyof Env, unknown>>) {
-  return {
-    get: (key: keyof Env) => values[key],
-  } as unknown as ConfigService<Env, true>;
-}
-
 describe('AuthGuard', () => {
-  const verify = vi.fn<TokenVerifierInterface['verify']>();
+  const verifyAccessToken = vi.fn<TokenServiceInterface['verifyAccessToken']>();
+  const tokens = { verifyAccessToken } as unknown as TokenServiceInterface;
   const logger = {
     log: vi.fn(),
     info: vi.fn(),
@@ -55,13 +48,7 @@ describe('AuthGuard', () => {
     debug: vi.fn(),
     setLogPrefix: vi.fn(),
   };
-  const reflector = new Reflector();
-
-  function create(
-    config: Partial<Record<keyof Env, unknown>> = { STAGE: 'e2e' },
-  ) {
-    return new AuthGuard({ verify }, logger, reflector, createConfig(config));
-  }
+  const guard = new AuthGuard(tokens, logger, new Reflector());
 
   function allLogs(): string {
     return JSON.stringify([
@@ -77,88 +64,101 @@ describe('AuthGuard', () => {
     vi.clearAllMocks();
   });
 
-  it('libera rota @Public sem consultar o token', async () => {
+  it('libera rota @Public sem consultar o token', () => {
     const { ctx } = context(PublicRoute);
 
-    await expect(create().canActivate(ctx)).resolves.toBe(true);
-    expect(verify).not.toHaveBeenCalled();
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(verifyAccessToken).not.toHaveBeenCalled();
   });
 
-  it('com Bearer válido, anexa o usuário com as permissões do mapa', async () => {
-    verify.mockResolvedValue({
+  it('com Bearer válido, anexa o usuário com as permissões derivadas do papel', () => {
+    verifyAccessToken.mockReturnValue({
       ok: true,
       claims: {
-        sub: 'u-1',
+        id: 'u-1',
         name: 'Maria',
         email: 'maria@x.test',
-        roles: [Role.Viewer],
+        role: Role.Viewer,
       },
     });
     const { ctx, request } = context(ProtectedRoute, {
       authorization: `Bearer ${SECRET_TOKEN}`,
     });
 
-    await expect(create().canActivate(ctx)).resolves.toBe(true);
+    expect(guard.canActivate(ctx)).toBe(true);
 
-    expect(verify).toHaveBeenCalledWith(SECRET_TOKEN);
+    expect(verifyAccessToken).toHaveBeenCalledWith(SECRET_TOKEN);
     expect(request.user).toEqual({
-      sub: 'u-1',
+      id: 'u-1',
       name: 'Maria',
       email: 'maria@x.test',
-      roles: [Role.Viewer],
+      role: Role.Viewer,
       permissions: ['content-brief:read', 'registry:read'],
     });
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it('aceita "bearer" em minúsculas', async () => {
-    verify.mockResolvedValue({
+  it('o admin ganha todas as permissões, inclusive user:*', () => {
+    verifyAccessToken.mockReturnValue({
       ok: true,
-      claims: { sub: 'u-1', name: null, email: null, roles: [] },
+      claims: { id: 'u-2', name: 'A', email: 'a@x.test', role: Role.Admin },
+    });
+    const { ctx, request } = context(ProtectedRoute, {
+      authorization: 'Bearer abc',
+    });
+
+    guard.canActivate(ctx);
+
+    expect(request.user?.permissions).toEqual(
+      expect.arrayContaining(['user:read', 'user:write']),
+    );
+  });
+
+  it('aceita "bearer" em minúsculas', () => {
+    verifyAccessToken.mockReturnValue({
+      ok: true,
+      claims: { id: 'u-1', name: 'M', email: 'm@x.test', role: Role.Editor },
     });
     const { ctx } = context(ProtectedRoute, { authorization: 'bearer abc' });
 
-    await expect(create().canActivate(ctx)).resolves.toBe(true);
-    expect(verify).toHaveBeenCalledWith('abc');
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(verifyAccessToken).toHaveBeenCalledWith('abc');
   });
 
   it.each([
-    ['sem cabeçalho', {}, 'token_missing'],
-    ['cabeçalho vazio', { authorization: '  ' }, 'token_missing'],
-    [
-      'esquema Basic',
-      { authorization: `Basic ${SECRET_TOKEN}` },
-      'invalid_format',
-    ],
-    ['Bearer sem token', { authorization: 'Bearer' }, 'invalid_format'],
-  ])(
-    'recusa %s com 401 UNAUTHENTICATED e log warn',
-    async (_name, headers, reason) => {
-      const { ctx } = context(ProtectedRoute, headers);
+    ['sem cabeçalho', {}],
+    ['cabeçalho vazio', { authorization: '  ' }],
+    ['esquema Basic', { authorization: `Basic ${SECRET_TOKEN}` }],
+    ['Bearer sem token', { authorization: 'Bearer' }],
+  ])('recusa %s com 401 UNAUTHENTICATED e log warn', (_name, headers) => {
+    const { ctx } = context(ProtectedRoute, headers);
 
-      const error = await create()
-        .canActivate(ctx)
-        .catch((e: unknown) => e);
+    const error = (() => {
+      try {
+        guard.canActivate(ctx);
+      } catch (e) {
+        return e;
+      }
+    })();
 
-      expect(error).toBeInstanceOf(UnauthenticatedError);
-      expect(error).toBeInstanceOf(UnauthorizedError);
-      expect(error).toMatchObject({
-        code: 'UNAUTHENTICATED',
-        message: 'Não autenticado.',
-      });
-      expect(verify).not.toHaveBeenCalled();
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          'evt.name': 'auth.guard.rejected',
-          outcome: 'blocked',
-          reason,
-        }),
-      );
-      expect(allLogs()).not.toContain(SECRET_TOKEN);
-      expect(allLogs().toLowerCase()).not.toContain('authorization');
-    },
-  );
+    expect(error).toBeInstanceOf(UnauthenticatedError);
+    expect(error).toBeInstanceOf(UnauthorizedError);
+    expect(error).toMatchObject({
+      code: 'UNAUTHENTICATED',
+      message: 'Não autenticado.',
+    });
+    expect(verifyAccessToken).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        'evt.name': 'auth.guard.rejected',
+        outcome: 'blocked',
+        reason: 'token_missing',
+      }),
+    );
+    expect(allLogs()).not.toContain(SECRET_TOKEN);
+    expect(allLogs().toLowerCase()).not.toContain('authorization');
+  });
 
   it.each([
     'invalid_signature',
@@ -166,112 +166,40 @@ describe('AuthGuard', () => {
     'invalid_issuer',
     'invalid_audience',
     'invalid_format',
-  ] as const)('motivo %s do serviço vira 401 com log warn', async (reason) => {
-    verify.mockResolvedValue({ ok: false, reason } as VerificationResult);
-    const { ctx } = context(ProtectedRoute, {
-      authorization: `Bearer ${SECRET_TOKEN}`,
-    });
+    'invalid_claims',
+  ] as TokenFailureReason[])(
+    'motivo %s do serviço vira 401 com log warn e sem vazar o token',
+    (reason) => {
+      verifyAccessToken.mockReturnValue({ ok: false, reason });
+      const { ctx } = context(ProtectedRoute, {
+        authorization: `Bearer ${SECRET_TOKEN}`,
+      });
 
-    await expect(create().canActivate(ctx)).rejects.toBeInstanceOf(
-      UnauthenticatedError,
-    );
+      expect(() => guard.canActivate(ctx)).toThrow(UnauthenticatedError);
 
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ 'evt.name': 'auth.guard.rejected', reason }),
-    );
-    expect(logger.error).not.toHaveBeenCalled();
-    expect(allLogs()).not.toContain(SECRET_TOKEN);
-  });
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ 'evt.name': 'auth.guard.rejected', reason }),
+      );
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(allLogs()).not.toContain(SECRET_TOKEN);
+    },
+  );
 
-  it('jwks_unavailable vira 401 com log de nível error', async () => {
-    verify.mockResolvedValue({ ok: false, reason: 'jwks_unavailable' });
-    const { ctx } = context(ProtectedRoute, {
-      authorization: `Bearer ${SECRET_TOKEN}`,
-    });
-
-    await expect(create().canActivate(ctx)).rejects.toBeInstanceOf(
-      UnauthenticatedError,
-    );
-
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        'evt.name': 'auth.guard.rejected',
-        reason: 'jwks_unavailable',
-      }),
-    );
-    expect(logger.warn).not.toHaveBeenCalled();
-    expect(allLogs()).not.toContain(SECRET_TOKEN);
-  });
-
-  it('inclui o request_id do contexto da requisição no log', async () => {
+  it('inclui o request_id do contexto da requisição no log', () => {
     const { ctx } = context(ProtectedRoute);
 
-    await requestContext.run({ requestId: 'req-123' }, async () => {
-      await create()
-        .canActivate(ctx)
-        .catch(() => undefined);
+    requestContext.run({ requestId: 'req-123' }, () => {
+      try {
+        guard.canActivate(ctx);
+      } catch {
+        // esperado: sem token
+      }
     });
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ request_id: 'req-123' }),
     );
-  });
-
-  describe('usuário mock', () => {
-    it('com STAGE=local e AUTH_MOCK_ENABLED, autentica sem token e avisa uma vez no boot', async () => {
-      const guard = create({
-        STAGE: 'local',
-        AUTH_MOCK_ENABLED: true,
-        AUTH_MOCK_ROLE: Role.Viewer,
-      });
-      const { ctx, request } = context(ProtectedRoute);
-
-      await expect(guard.canActivate(ctx)).resolves.toBe(true);
-      await expect(guard.canActivate(ctx)).resolves.toBe(true);
-
-      expect(request.user).toMatchObject({
-        sub: 'mock-user',
-        roles: [Role.Viewer],
-        permissions: ['content-brief:read', 'registry:read'],
-      });
-      expect(verify).not.toHaveBeenCalled();
-      expect(logger.warn).toHaveBeenCalledTimes(1);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({ 'evt.name': 'auth.mock_used' }),
-      );
-    });
-
-    it.each(['e2e', 'demo'])(
-      'com STAGE=%s o mock não vale, mesmo ligado',
-      async (stage) => {
-        const guard = create({
-          STAGE: stage,
-          AUTH_MOCK_ENABLED: true,
-          AUTH_MOCK_ROLE: Role.Editor,
-        });
-        const { ctx } = context(ProtectedRoute);
-
-        await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(
-          UnauthenticatedError,
-        );
-        expect(logger.warn).not.toHaveBeenCalledWith(
-          expect.any(String),
-          expect.objectContaining({ 'evt.name': 'auth.mock_used' }),
-        );
-      },
-    );
-
-    it('com STAGE=local e mock desligado exige token', async () => {
-      const guard = create({ STAGE: 'local', AUTH_MOCK_ENABLED: false });
-      const { ctx } = context(ProtectedRoute);
-
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(
-        UnauthenticatedError,
-      );
-    });
   });
 });

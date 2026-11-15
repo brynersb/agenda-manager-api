@@ -27,7 +27,8 @@ export class RegistrySummaryResponseDto {
 /** Quem criou ou alterou a pauta por último. */
 export class AuthorResponseDto {
   @ApiProperty({
-    description: 'Identificador do usuário no Keycloak (`sub` do token)',
+    description:
+      'Identificador do usuário que agiu (uuid; `bootstrap` ou `seed` quando veio de um deles)',
     example: 'f2a1c3d4-5b6e-4f70-8a91-b2c3d4e5f607',
   })
   id: string;

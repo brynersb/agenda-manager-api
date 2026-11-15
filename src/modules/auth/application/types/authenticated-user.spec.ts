@@ -1,30 +1,16 @@
-import {
-  type AuthenticatedUser,
-  toActor,
-} from '@/modules/auth/application/types/authenticated-user';
+import { toActor } from '@/modules/auth/application/types/authenticated-user';
+import { Role } from '@/modules/auth/domain/enums/role';
 
 describe('toActor', () => {
-  it('converte sub e name em Actor', () => {
-    const user: AuthenticatedUser = {
-      sub: 'u-1',
-      name: 'Maria',
-      email: 'maria@x.test',
-      roles: [],
-      permissions: [],
-    };
-
-    expect(toActor(user)).toEqual({ id: 'u-1', name: 'Maria' });
-  });
-
-  it('mantém name nulo', () => {
-    const actor = toActor({
-      sub: 'u-2',
-      name: null,
-      email: null,
-      roles: [],
-      permissions: [],
-    });
-
-    expect(actor).toEqual({ id: 'u-2', name: null });
+  it('converte id e name em Actor', () => {
+    expect(
+      toActor({
+        id: 'u-1',
+        name: 'Maria',
+        email: 'maria@x.test',
+        role: Role.Editor,
+        permissions: [],
+      }),
+    ).toEqual({ id: 'u-1', name: 'Maria' });
   });
 });

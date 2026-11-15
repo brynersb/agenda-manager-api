@@ -27,7 +27,7 @@ describe('OwnerDomainEntity', () => {
       );
       expect(e.name.value).toBe('Bela Vista');
       expect(e.email).toBeNull();
-      expect(e.keycloakUserId).toBeNull();
+      expect(e.userId).toBeNull();
       expect(e.active).toBe(true);
       expect(e.version).toBe(1);
       expect(e.audit).toEqual(newAudit(author, t0));
@@ -45,7 +45,7 @@ describe('OwnerDomainEntity', () => {
         id: 'id-1',
         name: RegistryName.restore('Água Clara'),
         email: Email.restore('agua@bora.com'),
-        keycloakUserId: 'kc-1',
+        userId: 'user-1',
         active: false,
         version: 7,
         audit,
@@ -54,7 +54,7 @@ describe('OwnerDomainEntity', () => {
       expect(e.id).toBe('id-1');
       expect(e.name.value).toBe('Água Clara');
       expect(e.email?.value).toBe('agua@bora.com');
-      expect(e.keycloakUserId).toBe('kc-1');
+      expect(e.userId).toBe('user-1');
       expect(e.active).toBe(false);
       expect(e.version).toBe(7);
       expect(e.audit).toBe(audit);

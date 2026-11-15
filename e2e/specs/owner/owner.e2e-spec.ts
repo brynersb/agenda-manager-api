@@ -92,11 +92,11 @@ describe('Responsáveis (e2e)', () => {
       expect((await findAll()).body).toHaveLength(1);
     });
 
-    it('usuário sem papel recebe 403 até na leitura', async () => {
-      const res = await findAll('', TOKENS.noRole);
+    it('token com papel desconhecido recebe 401 até na leitura', async () => {
+      const res = await findAll('', TOKENS.unknownRole);
 
-      expect(res.status).toBe(403);
-      expect((res.body as unknown as ErrorBody).code).toBe('FORBIDDEN');
+      expect(res.status).toBe(401);
+      expect((res.body as unknown as ErrorBody).code).toBe('UNAUTHENTICATED');
     });
   });
 
@@ -591,14 +591,14 @@ describe('Responsáveis (e2e)', () => {
       expect(archived.body.email).toBe('ana@bora.com.br');
     });
 
-    it('keycloak_user_id fica nulo (sem uso no MVP)', async () => {
+    it('user_id fica nulo (vínculo com usuário sem uso no MVP)', async () => {
       const ana = await post({ name: 'Ana' });
 
       const [row] = await e2e.dataSource.query(
-        'SELECT keycloak_user_id FROM owners WHERE id = $1',
+        'SELECT user_id FROM owners WHERE id = $1',
         [ana.body.id],
       );
-      expect(row.keycloak_user_id).toBeNull();
+      expect(row.user_id).toBeNull();
     });
   });
 

@@ -181,13 +181,13 @@ describe('Pautas (e2e)', () => {
       });
     });
 
-    it('usuário sem papel recebe 403 até na leitura', async () => {
+    it('token com papel desconhecido recebe 401 até na leitura', async () => {
       const created = await create({ title: 'Post' });
 
-      const res = await find(created.body.id, TOKENS.noRole);
+      const res = await find(created.body.id, TOKENS.unknownRole);
 
-      expect(res.status).toBe(403);
-      expect(res.body.code).toBe('FORBIDDEN');
+      expect(res.status).toBe(401);
+      expect(res.body.code).toBe('UNAUTHENTICATED');
     });
   });
 

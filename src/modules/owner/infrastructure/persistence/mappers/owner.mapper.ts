@@ -11,7 +11,7 @@ export const OwnerMapper = {
       id: entity.id,
       name: RegistryName.restore(entity.name),
       email: entity.email === null ? null : Email.restore(entity.email),
-      keycloakUserId: entity.keycloakUserId,
+      userId: entity.userId,
       active: entity.active,
       version: entity.version,
       audit: {
@@ -31,7 +31,7 @@ export const OwnerMapper = {
     entity.name = owner.name.value;
     entity.normalizedName = owner.name.normalized;
     entity.email = owner.email?.value ?? null;
-    entity.keycloakUserId = owner.keycloakUserId;
+    entity.userId = owner.userId;
     entity.active = owner.active;
     entity.version = owner.version;
     const audit = new AuditColumns();

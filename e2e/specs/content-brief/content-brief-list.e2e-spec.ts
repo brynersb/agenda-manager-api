@@ -775,14 +775,14 @@ describe('Listagem e resumo de pautas (e2e)', () => {
       expect(counts.body.total).toBe(1);
     });
 
-    it('usuário sem papel recebe 403 FORBIDDEN', async () => {
-      const listed = await list('', TOKENS.noRole);
-      const counts = await summary('', TOKENS.noRole);
+    it('token com papel desconhecido recebe 401 UNAUTHENTICATED', async () => {
+      const listed = await list('', TOKENS.unknownRole);
+      const counts = await summary('', TOKENS.unknownRole);
 
-      expect(listed.status).toBe(403);
-      expect(listed.body.code).toBe('FORBIDDEN');
-      expect(counts.status).toBe(403);
-      expect(counts.body.code).toBe('FORBIDDEN');
+      expect(listed.status).toBe(401);
+      expect(listed.body.code).toBe('UNAUTHENTICATED');
+      expect(counts.status).toBe(401);
+      expect(counts.body.code).toBe('UNAUTHENTICATED');
     });
 
     it('sem token recebe 401 UNAUTHENTICATED', async () => {

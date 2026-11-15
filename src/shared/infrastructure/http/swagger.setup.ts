@@ -9,7 +9,7 @@ export function setupSwagger(app: INestApplication): void {
   const config = new DocumentBuilder()
     .setTitle('Pauta de marketing Bora API')
     .setDescription(
-      'API da pauta de marketing: pautas, empreendimentos e responsáveis',
+      'API da pauta de marketing: pautas, empreendimentos, responsáveis e usuários. Para autenticar: `POST /api/v1/auth/login` e use o `accessToken` em "Authorize".',
     )
     .setVersion('1.0')
     .addBearerAuth(
@@ -17,7 +17,8 @@ export function setupSwagger(app: INestApplication): void {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        description: 'Access token do Keycloak (nunca o id token)',
+        description:
+          'Access token (JWT HS256) devolvido por `POST /api/v1/auth/login`. Vale 15 minutos; renove com `POST /api/v1/auth/refresh`.',
       },
       SWAGGER_BEARER,
     )

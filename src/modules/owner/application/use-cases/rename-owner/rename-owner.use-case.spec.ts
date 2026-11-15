@@ -28,7 +28,7 @@ function existing(id = 'e-1', name = 'Bela Vista', active = true, version = 3) {
     id,
     name: RegistryName.create(name),
     email: Email.restore('antigo@bora.com'),
-    keycloakUserId: null,
+    userId: null,
     active,
     version,
     audit: newAudit({ id: 'u-1', name: 'Ana' }, new Date()),

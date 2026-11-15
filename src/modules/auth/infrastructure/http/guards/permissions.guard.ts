@@ -79,7 +79,7 @@ export class PermissionsGuard implements CanActivate {
       this.logger.warn('Permissão negada', {
         'evt.name': 'auth.permissions.denied',
         outcome: 'blocked',
-        user_sub: user.sub,
+        user_sub: user.id,
         required_permissions: required,
         tags: ['auth', 'permissions'],
       });

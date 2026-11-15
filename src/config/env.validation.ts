@@ -9,13 +9,15 @@ import {
   IsNotEmpty,
   Matches,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateIf,
   validateSync,
 } from 'class-validator';
 
+import { DURATION_PATTERN } from '@/config/duration';
 import { DATABASE_LOCAL_DEFAULTS } from '@/database/database-defaults';
-import { KNOWN_ROLES, Role } from '@/modules/auth/domain/enums/role';
 
 export enum NodeEnv {
   Development = 'development',
@@ -39,6 +41,20 @@ export enum LogLevel {
 
 const DEFAULT_CORS_ORIGINS = 'http://localhost:5173';
 const STAGES_WITH_DEFAULT_CORS: readonly Stage[] = [Stage.Local, Stage.E2e];
+
+/**
+ * Segredo JWT de desenvolvimento: só vale em `local` e `e2e` (placeholder
+ * público, nunca um segredo real). Fora deles `JWT_SECRET` é obrigatória e
+ * este valor é recusado.
+ */
+export const DEV_JWT_SECRET =
+  'dev-only-insecure-jwt-secret-do-not-use-in-production';
+const STAGES_WITH_DEFAULT_JWT_SECRET: readonly Stage[] = [
+  Stage.Local,
+  Stage.E2e,
+];
+const JWT_SECRET_MIN_LENGTH = 32;
+const BOOTSTRAP_EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Postgres do `docker/compose.yaml` (porta 5433 do host); só vale em `local`. */
 const DATABASE_DEFAULTS_LOCAL = {
@@ -80,17 +96,6 @@ function parseStrictBoolean(value: unknown): unknown {
 
 function isBlank(value: unknown): boolean {
   return value === undefined || value === '';
-}
-
-/**
- * O issuer e a audience do OIDC são obrigatórios, exceto no e2e (token de
- * teste) e em `local` com o usuário mock ligado (ADR-003).
- */
-function requiresOidc(config: EnvironmentVariables): boolean {
-  if (config.STAGE === Stage.E2e) {
-    return false;
-  }
-  return !(config.STAGE === Stage.Local && config.AUTH_MOCK_ENABLED);
 }
 
 export class EnvironmentVariables {
@@ -191,47 +196,79 @@ export class EnvironmentVariables {
   @Min(1)
   DATABASE_POOL_MAX: number = 10;
 
-  /** Issuer do Keycloak (ex.: `http://localhost:8080/realms/bora`). */
-  @ValidateIf(
-    (c: EnvironmentVariables) => requiresOidc(c) || !!c.OIDC_ISSUER_URL,
-  )
+  /**
+   * Segredo HMAC dos access tokens (HS256), mínimo de 32 caracteres. O padrão
+   * de desenvolvimento só existe em `local`/`e2e`; fora deles é obrigatório
+   * (preenchido em `validate`). Nunca é registrado em log.
+   * Gere com `openssl rand -base64 48`.
+   */
   @IsNotEmpty({
+    message: 'JWT_SECRET é obrigatório quando STAGE não é local nem e2e',
+  })
+  @MinLength(JWT_SECRET_MIN_LENGTH, {
+    message: `JWT_SECRET deve ter no mínimo ${JWT_SECRET_MIN_LENGTH} caracteres`,
+  })
+  JWT_SECRET: string;
+
+  /** `iss` fixo do access token. */
+  @IsNotEmpty({ message: 'JWT_ISSUER não pode ser vazio' })
+  JWT_ISSUER: string = 'pauta-mkt-api';
+
+  /** `aud` fixo do access token. */
+  @IsNotEmpty({ message: 'JWT_AUDIENCE não pode ser vazio' })
+  JWT_AUDIENCE: string = 'pauta-mkt';
+
+  /** Validade do access token (`15m`, `1h`...). */
+  @Matches(DURATION_PATTERN, {
     message:
-      'OIDC_ISSUER_URL é obrigatória, exceto com STAGE=e2e ou STAGE=local com AUTH_MOCK_ENABLED=true',
+      'JWT_ACCESS_TTL deve ser um inteiro positivo seguido de s, m, h ou d (ex.: 15m)',
   })
-  @Matches(/^https?:\/\//, {
-    message: 'OIDC_ISSUER_URL deve começar com http:// ou https://',
-  })
-  OIDC_ISSUER_URL?: string;
+  JWT_ACCESS_TTL: string = '15m';
 
-  /** CSV de audiences aceitas; o `aud` do token precisa conter alguma. */
-  @ValidateIf((c: EnvironmentVariables) => requiresOidc(c))
-  @IsNotEmpty({
+  /** Validade do refresh token (`7d`...). */
+  @Matches(DURATION_PATTERN, {
     message:
-      'OIDC_AUDIENCE é obrigatória, exceto com STAGE=e2e ou STAGE=local com AUTH_MOCK_ENABLED=true',
+      'JWT_REFRESH_TTL deve ser um inteiro positivo seguido de s, m, h ou d (ex.: 7d)',
   })
-  OIDC_AUDIENCE?: string;
+  JWT_REFRESH_TTL: string = '7d';
 
-  /** Opcional: padrão `${OIDC_ISSUER_URL}/protocol/openid-connect/certs`. */
-  @ValidateIf((c: EnvironmentVariables) => !!c.OIDC_JWKS_URI)
-  @Matches(/^https?:\/\//, {
-    message: 'OIDC_JWKS_URI deve começar com http:// ou https://',
+  /** Falhas de senha seguidas que bloqueiam a conta. */
+  @IsInt()
+  @Min(1)
+  LOGIN_MAX_ATTEMPTS: number = 5;
+
+  /** Minutos de bloqueio da conta depois de `LOGIN_MAX_ATTEMPTS` falhas. */
+  @IsInt()
+  @Min(1)
+  LOGIN_LOCK_MINUTES: number = 15;
+
+  /** Limite de requisições por minuto, por IP, nas rotas de login e troca de senha. */
+  @IsInt()
+  @Min(1)
+  LOGIN_THROTTLE_LIMIT_PER_MINUTE: number = 10;
+
+  /**
+   * Administrador inicial: criado ao subir só se não existir nenhum usuário e
+   * as duas variáveis estiverem definidas (as duas ou nenhuma). Só o formato é
+   * validado quando definidas. O admin nasce com `mustChangePassword = true`.
+   */
+  @ValidateIf((c: EnvironmentVariables) => !isBlank(c.BOOTSTRAP_ADMIN_EMAIL))
+  @Matches(BOOTSTRAP_EMAIL_FORMAT, {
+    message: 'BOOTSTRAP_ADMIN_EMAIL deve ser um e-mail válido',
   })
-  OIDC_JWKS_URI?: string;
-
-  /** Caminho com ponto da claim que lista os papéis do usuário. */
-  @IsNotEmpty({ message: 'OIDC_ROLES_CLAIM não pode ser vazia' })
-  OIDC_ROLES_CLAIM: string = 'realm_access.roles';
-
-  /** Liga o usuário mock; só é aceito com `STAGE=local` (ver `validate`). */
-  @Transform(({ obj }) => toBoolean(obj.AUTH_MOCK_ENABLED, false))
-  @IsBoolean()
-  AUTH_MOCK_ENABLED: boolean = false;
-
-  @IsIn(KNOWN_ROLES, {
-    message: `AUTH_MOCK_ROLE deve ser um destes papéis: ${KNOWN_ROLES.join(', ')}`,
+  @MaxLength(254, {
+    message: 'BOOTSTRAP_ADMIN_EMAIL deve ter no máximo 254 caracteres',
   })
-  AUTH_MOCK_ROLE: Role = Role.Editor;
+  BOOTSTRAP_ADMIN_EMAIL?: string;
+
+  @ValidateIf((c: EnvironmentVariables) => !isBlank(c.BOOTSTRAP_ADMIN_PASSWORD))
+  @MinLength(10, {
+    message: 'BOOTSTRAP_ADMIN_PASSWORD deve ter no mínimo 10 caracteres',
+  })
+  @MaxLength(128, {
+    message: 'BOOTSTRAP_ADMIN_PASSWORD deve ter no máximo 128 caracteres',
+  })
+  BOOTSTRAP_ADMIN_PASSWORD?: string;
 }
 
 /** Tipo usado em `ConfigService<Env, true>` com `{ infer: true }`. */
@@ -247,6 +284,13 @@ export function validate(config: Record<string, unknown>): Env {
     STAGES_WITH_DEFAULT_CORS.includes(validated.STAGE)
   ) {
     validated.CORS_ORIGINS = DEFAULT_CORS_ORIGINS;
+  }
+
+  if (
+    isBlank(config.JWT_SECRET) &&
+    STAGES_WITH_DEFAULT_JWT_SECRET.includes(validated.STAGE)
+  ) {
+    validated.JWT_SECRET = DEV_JWT_SECRET;
   }
 
   if (validated.STAGE === Stage.Local) {
@@ -265,10 +309,23 @@ export function validate(config: Record<string, unknown>): Env {
       ` - ${error.property}: ${[...new Set(Object.values(error.constraints ?? {}))].join('; ')}`,
   );
 
-  // Trava de segurança: o usuário mock nunca pode existir fora de `local`.
-  if (validated.AUTH_MOCK_ENABLED === true && validated.STAGE !== Stage.Local) {
+  // Trava de segurança: o segredo de desenvolvimento nunca vale fora de local/e2e.
+  if (
+    validated.JWT_SECRET === DEV_JWT_SECRET &&
+    !STAGES_WITH_DEFAULT_JWT_SECRET.includes(validated.STAGE)
+  ) {
     details.push(
-      ` - AUTH_MOCK_ENABLED: só pode ser true com STAGE=local (STAGE atual: ${validated.STAGE})`,
+      ` - JWT_SECRET: o segredo de desenvolvimento não é aceito com STAGE=${validated.STAGE}; gere um segredo próprio (openssl rand -base64 48)`,
+    );
+  }
+
+  // Administrador inicial: as duas variáveis ou nenhuma.
+  if (
+    isBlank(validated.BOOTSTRAP_ADMIN_EMAIL) !==
+    isBlank(validated.BOOTSTRAP_ADMIN_PASSWORD)
+  ) {
+    details.push(
+      ' - BOOTSTRAP_ADMIN_EMAIL e BOOTSTRAP_ADMIN_PASSWORD devem ser definidos juntos (ou nenhum dos dois)',
     );
   }
 

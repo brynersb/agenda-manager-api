@@ -4,19 +4,15 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 
-import { type Env, Stage } from '@/config/env.validation';
 import {
-  OIDC_TOKEN_SERVICE,
+  TOKEN_SERVICE,
   type TokenFailureReason,
-  type TokenVerifierInterface,
-} from '@/modules/auth/application/interfaces/token-verifier.interface';
-import type { AuthenticatedUser } from '@/modules/auth/application/types/authenticated-user';
-import { permissionsOfRoles } from '@/modules/auth/application/types/role-permissions.map';
-import type { Role } from '@/modules/auth/domain/enums/role';
+  type TokenServiceInterface,
+} from '@/modules/auth/application/interfaces/token.service.interface';
 import { UnauthenticatedError } from '@/modules/auth/domain/errors/auth.errors';
+import { permissionsOfRole } from '@/modules/auth/domain/services/role-permissions';
 import { IS_PUBLIC_KEY } from '@/modules/auth/infrastructure/http/decorators/public.decorator';
 import type { AuthenticatedRequest } from '@/modules/auth/infrastructure/http/types/authenticated-request';
 import type { LoggerServiceInterface } from '@/shared/application/interfaces/logger.service.interface';
@@ -25,49 +21,29 @@ import { requestContext } from '@/shared/infrastructure/http/request-context';
 
 const BEARER_PREFIX = /^Bearer\s+(.+)$/i;
 
+type RejectionReason = TokenFailureReason | 'token_missing';
+
 /**
  * Autentica a requisição pelo `Authorization: Bearer <access token>`.
- * `@Public()` libera; o mock de usuário só existe com `STAGE=local` **e**
- * `AUTH_MOCK_ENABLED=true`. Toda recusa vira o mesmo 401 `UNAUTHENTICATED`; o
- * motivo vai só para o log e o token nunca é registrado.
+ * `@Public()` libera. O token é validado localmente (assinatura HS256, `iss`,
+ * `aud`, expiração): o usuário vem das claims e **não há consulta ao banco por
+ * requisição**. Consequência (ADR-016): desativar um usuário ou trocar o papel
+ * dele só vale nos tokens novos, no máximo `JWT_ACCESS_TTL` depois (padrão
+ * 15 min). As permissões saem do papel no servidor, nunca do token. Toda
+ * recusa vira o mesmo 401 `UNAUTHENTICATED`; o motivo vai só para o log e o
+ * token nunca é registrado.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
-  private readonly mockUser: AuthenticatedUser | null = null;
-
   constructor(
-    @Inject(OIDC_TOKEN_SERVICE) private readonly tokens: TokenVerifierInterface,
+    @Inject(TOKEN_SERVICE) private readonly tokens: TokenServiceInterface,
     @Inject(LOGGER_SERVICE) private readonly logger: LoggerServiceInterface,
     private readonly reflector: Reflector,
-    config: ConfigService<Env, true>,
   ) {
     this.logger.setLogPrefix(AuthGuard.name);
-
-    const mockEnabled =
-      config.get('STAGE', { infer: true }) === Stage.Local &&
-      config.get('AUTH_MOCK_ENABLED', { infer: true });
-    if (mockEnabled) {
-      const role: Role = config.get('AUTH_MOCK_ROLE', { infer: true });
-      this.mockUser = {
-        sub: 'mock-user',
-        name: 'Usuário Mock',
-        email: null,
-        roles: [role],
-        permissions: permissionsOfRoles([role]),
-      };
-      this.logger.warn(
-        'Autenticação simulada ligada: toda requisição passa como usuário mock',
-        {
-          'evt.name': 'auth.mock_used',
-          outcome: 'success',
-          role,
-          tags: ['auth', 'mock'],
-        },
-      );
-    }
   }
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     const isPublic = this.reflector.getAllAndOverride<boolean | undefined>(
       IS_PUBLIC_KEY,
       [context.getHandler(), context.getClass()],
@@ -78,59 +54,42 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
-    if (this.mockUser) {
-      request.user = this.mockUser;
-      return true;
-    }
-
     const token = this.extractToken(request.headers.authorization);
-    if (typeof token !== 'string') {
-      return this.reject(token.reason);
+    if (token === null) {
+      return this.reject('token_missing');
     }
 
-    const result = await this.tokens.verify(token);
+    const result = this.tokens.verifyAccessToken(token);
     if (!result.ok) {
       return this.reject(result.reason);
     }
 
-    const { sub, name, email, roles } = result.claims;
+    const { id, name, email, role } = result.claims;
     request.user = {
-      sub,
+      id,
       name,
       email,
-      roles,
-      permissions: permissionsOfRoles(roles),
+      role,
+      permissions: permissionsOfRole(role),
     };
     return true;
   }
 
-  private extractToken(
-    header: string | undefined,
-  ): string | { reason: TokenFailureReason } {
+  private extractToken(header: string | undefined): string | null {
     if (!header || header.trim() === '') {
-      return { reason: 'token_missing' };
+      return null;
     }
-    const token = BEARER_PREFIX.exec(header.trim())?.[1];
-    return token ?? { reason: 'invalid_format' };
+    return BEARER_PREFIX.exec(header.trim())?.[1] ?? null;
   }
 
-  private reject(reason: TokenFailureReason): never {
-    const unavailable = reason === 'jwks_unavailable';
-    const fields = {
+  private reject(reason: RejectionReason): never {
+    this.logger.warn('Requisição não autenticada recusada', {
       'evt.name': 'auth.guard.rejected',
       outcome: 'blocked',
       reason,
       request_id: requestContext.getStore()?.requestId,
       tags: ['auth', 'guard'],
-    };
-    if (unavailable) {
-      this.logger.error(
-        'Requisição recusada: não foi possível obter as chaves do provedor de identidade',
-        fields,
-      );
-    } else {
-      this.logger.warn('Requisição não autenticada recusada', fields);
-    }
+    });
     throw new UnauthenticatedError();
   }
 }
