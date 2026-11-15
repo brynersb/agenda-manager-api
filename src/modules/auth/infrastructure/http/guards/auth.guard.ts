@@ -11,8 +11,12 @@ import {
   type TokenFailureReason,
   type TokenServiceInterface,
 } from '@/modules/auth/application/interfaces/token.service.interface';
-import { UnauthenticatedError } from '@/modules/auth/domain/errors/auth.errors';
+import {
+  PasswordChangeRequiredError,
+  UnauthenticatedError,
+} from '@/modules/auth/domain/errors/auth.errors';
 import { permissionsOfRole } from '@/modules/auth/domain/services/role-permissions';
+import { ALLOW_PENDING_PASSWORD_CHANGE_KEY } from '@/modules/auth/infrastructure/http/decorators/allow-pending-password-change.decorator';
 import { IS_PUBLIC_KEY } from '@/modules/auth/infrastructure/http/decorators/public.decorator';
 import type { AuthenticatedRequest } from '@/modules/auth/infrastructure/http/types/authenticated-request';
 import type { LoggerServiceInterface } from '@/shared/application/interfaces/logger.service.interface';
@@ -31,7 +35,9 @@ type RejectionReason = TokenFailureReason | 'token_missing';
  * dele só vale nos tokens novos, no máximo `JWT_ACCESS_TTL` depois (padrão
  * 15 min). As permissões saem do papel no servidor, nunca do token. Toda
  * recusa vira o mesmo 401 `UNAUTHENTICATED`; o motivo vai só para o log e o
- * token nunca é registrado.
+ * token nunca é registrado. Token com a claim `mcp` (senha provisória pendente)
+ * só passa nas rotas `@AllowPendingPasswordChange()`; nas demais, 403
+ * `PASSWORD_CHANGE_REQUIRED`.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -64,13 +70,32 @@ export class AuthGuard implements CanActivate {
       return this.reject(result.reason);
     }
 
-    const { id, name, email, role } = result.claims;
+    const { id, name, email, role, mustChangePassword } = result.claims;
+    if (
+      mustChangePassword &&
+      !this.reflector.getAllAndOverride<boolean | undefined>(
+        ALLOW_PENDING_PASSWORD_CHANGE_KEY,
+        [context.getHandler(), context.getClass()],
+      )
+    ) {
+      this.logger.warn('Requisição com senha provisória pendente recusada', {
+        'evt.name': 'auth.guard.rejected',
+        outcome: 'blocked',
+        reason: 'password_change_required',
+        user_sub: id,
+        request_id: requestContext.getStore()?.requestId,
+        tags: ['auth', 'guard'],
+      });
+      throw new PasswordChangeRequiredError();
+    }
+
     request.user = {
       id,
       name,
       email,
       role,
       permissions: permissionsOfRole(role),
+      mustChangePassword,
     };
     return true;
   }

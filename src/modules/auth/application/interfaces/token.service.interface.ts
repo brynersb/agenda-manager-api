@@ -1,11 +1,25 @@
 import type { Role } from '@/modules/auth/domain/enums/role';
 
-/** Dados que entram no access token (as claims `sub`, `email`, `name` e `role`). */
+/**
+ * Dados que entram no access token (as claims `sub`, `email`, `name`, `role` e,
+ * só quando verdadeira, `mcp`).
+ */
 export type AccessTokenSubject = {
   id: string;
   email: string;
   name: string;
   role: Role;
+  /**
+   * Senha provisória pendente: vira a claim booleana `mcp` (must change
+   * password), omitida quando falso. O `AuthGuard` restringe o token às rotas
+   * `@AllowPendingPasswordChange()`.
+   */
+  mustChangePassword?: boolean;
+};
+
+/** Claims validadas de um access token: `mustChangePassword` é sempre booleano. */
+export type AccessTokenClaims = AccessTokenSubject & {
+  mustChangePassword: boolean;
 };
 
 export type IssuedAccessToken = {
@@ -24,7 +38,7 @@ export type TokenFailureReason =
   | 'invalid_claims';
 
 export type VerificationResult =
-  | { ok: true; claims: AccessTokenSubject }
+  | { ok: true; claims: AccessTokenClaims }
   | { ok: false; reason: TokenFailureReason };
 
 /** Refresh token recém-gerado: o valor em claro vai ao cliente; só o hash é gravado. */

@@ -128,14 +128,18 @@ describe('Administração de usuários (e2e)', () => {
       expect(first.status).toBe(200);
       expect(first.body.mustChangePassword).toBe(true);
 
-      const changed = await e2e.client.post(CHANGE_PASSWORD_URL, {
-        token: first.body.accessToken,
-        body: {
-          currentPassword: temporary,
-          newPassword: 'minha-senha-definitiva-1',
+      const changed = await e2e.client.post<{ mustChangePassword: boolean }>(
+        CHANGE_PASSWORD_URL,
+        {
+          token: first.body.accessToken,
+          body: {
+            currentPassword: temporary,
+            newPassword: 'minha-senha-definitiva-1',
+          },
         },
-      });
-      expect(changed.status).toBe(204);
+      );
+      expect(changed.status).toBe(200);
+      expect(changed.body.mustChangePassword).toBe(false);
 
       const second = await login(e2e, {
         email: 'maria@e2e.test',

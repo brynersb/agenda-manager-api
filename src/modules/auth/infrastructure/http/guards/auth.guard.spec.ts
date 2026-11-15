@@ -6,7 +6,11 @@ import type {
   TokenServiceInterface,
 } from '@/modules/auth/application/interfaces/token.service.interface';
 import { Role } from '@/modules/auth/domain/enums/role';
-import { UnauthenticatedError } from '@/modules/auth/domain/errors/auth.errors';
+import {
+  PasswordChangeRequiredError,
+  UnauthenticatedError,
+} from '@/modules/auth/domain/errors/auth.errors';
+import { AllowPendingPasswordChange } from '@/modules/auth/infrastructure/http/decorators/allow-pending-password-change.decorator';
 import { Public } from '@/modules/auth/infrastructure/http/decorators/public.decorator';
 import { AuthGuard } from '@/modules/auth/infrastructure/http/guards/auth.guard';
 import type { AuthenticatedRequest } from '@/modules/auth/infrastructure/http/types/authenticated-request';
@@ -16,6 +20,11 @@ import { requestContext } from '@/shared/infrastructure/http/request-context';
 const SECRET_TOKEN = 'eyJ.token-que-nunca-pode-vazar.assinatura';
 
 class ProtectedRoute {
+  handler() {}
+}
+
+class PendingPasswordRoute {
+  @AllowPendingPasswordChange()
   handler() {}
 }
 
@@ -79,6 +88,7 @@ describe('AuthGuard', () => {
         name: 'Maria',
         email: 'maria@x.test',
         role: Role.Viewer,
+        mustChangePassword: false,
       },
     });
     const { ctx, request } = context(ProtectedRoute, {
@@ -94,6 +104,7 @@ describe('AuthGuard', () => {
       email: 'maria@x.test',
       role: Role.Viewer,
       permissions: ['content-brief:read', 'registry:read'],
+      mustChangePassword: false,
     });
     expect(logger.warn).not.toHaveBeenCalled();
   });
@@ -101,7 +112,13 @@ describe('AuthGuard', () => {
   it('o admin ganha todas as permissões, inclusive user:*', () => {
     verifyAccessToken.mockReturnValue({
       ok: true,
-      claims: { id: 'u-2', name: 'A', email: 'a@x.test', role: Role.Admin },
+      claims: {
+        id: 'u-2',
+        name: 'A',
+        email: 'a@x.test',
+        role: Role.Admin,
+        mustChangePassword: false,
+      },
     });
     const { ctx, request } = context(ProtectedRoute, {
       authorization: 'Bearer abc',
@@ -114,10 +131,80 @@ describe('AuthGuard', () => {
     );
   });
 
+  describe('token com senha provisória pendente (mcp)', () => {
+    const pendingClaims = {
+      id: 'u-3',
+      name: 'Nova',
+      email: 'nova@x.test',
+      role: Role.Editor,
+      mustChangePassword: true,
+    };
+
+    it('nega rota comum com 403 PASSWORD_CHANGE_REQUIRED e log sem vazar o token', () => {
+      verifyAccessToken.mockReturnValue({ ok: true, claims: pendingClaims });
+      const { ctx, request } = context(ProtectedRoute, {
+        authorization: `Bearer ${SECRET_TOKEN}`,
+      });
+
+      const error = (() => {
+        try {
+          guard.canActivate(ctx);
+        } catch (e) {
+          return e;
+        }
+      })();
+
+      expect(error).toBeInstanceOf(PasswordChangeRequiredError);
+      expect(error).toMatchObject({
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        kind: 'FORBIDDEN',
+        message: 'Troque a senha provisória para continuar.',
+      });
+      expect(request.user).toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          'evt.name': 'auth.guard.rejected',
+          outcome: 'blocked',
+          reason: 'password_change_required',
+          user_sub: 'u-3',
+        }),
+      );
+      expect(allLogs()).not.toContain(SECRET_TOKEN);
+    });
+
+    it('libera rota @AllowPendingPasswordChange e expõe mustChangePassword no usuário', () => {
+      verifyAccessToken.mockReturnValue({ ok: true, claims: pendingClaims });
+      const { ctx, request } = context(PendingPasswordRoute, {
+        authorization: 'Bearer abc',
+      });
+
+      expect(guard.canActivate(ctx)).toBe(true);
+
+      expect(request.user).toMatchObject({
+        id: 'u-3',
+        mustChangePassword: true,
+      });
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('rota @Public continua liberada', () => {
+      const { ctx } = context(PublicRoute);
+
+      expect(guard.canActivate(ctx)).toBe(true);
+    });
+  });
+
   it('aceita "bearer" em minúsculas', () => {
     verifyAccessToken.mockReturnValue({
       ok: true,
-      claims: { id: 'u-1', name: 'M', email: 'm@x.test', role: Role.Editor },
+      claims: {
+        id: 'u-1',
+        name: 'M',
+        email: 'm@x.test',
+        role: Role.Editor,
+        mustChangePassword: false,
+      },
     });
     const { ctx } = context(ProtectedRoute, { authorization: 'bearer abc' });
 

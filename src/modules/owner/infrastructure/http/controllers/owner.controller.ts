@@ -71,7 +71,8 @@ const RESPONSE_401 = {
 
 const RESPONSE_403 = {
   status: 403,
-  description: 'Sem a permissão `registry:write` (`FORBIDDEN`)',
+  description:
+    'Sem a permissão `registry:write` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   content: {
     [JSON_ERROR]: {
       example: {
@@ -212,7 +213,8 @@ export class OwnerController {
   @ApiResponse(RESPONSE_401)
   @ApiResponse({
     ...RESPONSE_403,
-    description: 'Sem a permissão `registry:read` (`FORBIDDEN`)',
+    description:
+      'Sem a permissão `registry:read` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   })
   async findAll(
     @Query() query: ListRegistriesQueryDto,

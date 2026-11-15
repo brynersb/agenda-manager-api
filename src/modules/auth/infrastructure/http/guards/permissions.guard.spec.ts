@@ -66,7 +66,14 @@ function context(
 }
 
 function user(role: Role, permissions: Permission[]): AuthenticatedUser {
-  return { id: 'u-1', name: 'Maria', email: 'm@x.test', role, permissions };
+  return {
+    id: 'u-1',
+    name: 'Maria',
+    email: 'm@x.test',
+    role,
+    permissions,
+    mustChangePassword: false,
+  };
 }
 
 const editor = user(Role.Editor, [

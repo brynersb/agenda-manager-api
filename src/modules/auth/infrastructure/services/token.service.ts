@@ -56,8 +56,8 @@ function verificationErrorReason(error: unknown): TokenFailureReason {
 }
 
 /**
- * Access token JWT HS256 (`sub`, `email`, `name`, `role`, `iss`, `aud`, `iat`,
- * `exp`) e refresh token opaco de 256 bits (ADR-016). A verificação do JWT é
+ * Access token JWT HS256 (`sub`, `email`, `name`, `role`, `mcp` quando há senha
+ * provisória pendente, `iss`, `aud`, `iat`, `exp`) e refresh token opaco de 256 bits (ADR-016). A verificação do JWT é
  * local e não consulta o banco.
  */
 export class TokenService implements TokenServiceInterface {
@@ -69,7 +69,12 @@ export class TokenService implements TokenServiceInterface {
 
   issueAccessToken(subject: AccessTokenSubject): IssuedAccessToken {
     const token = jwt.sign(
-      { email: subject.email, name: subject.name, role: subject.role },
+      {
+        email: subject.email,
+        name: subject.name,
+        role: subject.role,
+        ...(subject.mustChangePassword ? { mcp: true } : {}),
+      },
       this.config.secret,
       {
         algorithm: ALGORITHM,
@@ -105,7 +110,16 @@ export class TokenService implements TokenServiceInterface {
     if (!id || !email || !name || !isRole(role)) {
       return { ok: false, reason: 'invalid_claims' };
     }
-    return { ok: true, claims: { id, email, name, role } };
+    return {
+      ok: true,
+      claims: {
+        id,
+        email,
+        name,
+        role,
+        mustChangePassword: payload.mcp === true,
+      },
+    };
   }
 
   generateRefreshToken(): GeneratedRefreshToken {

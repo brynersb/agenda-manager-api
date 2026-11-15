@@ -88,7 +88,8 @@ const RESPONSE_401 = {
 
 const RESPONSE_403_WRITE = {
   status: 403,
-  description: 'Sem a permissão `content-brief:write` (`FORBIDDEN`)',
+  description:
+    'Sem a permissão `content-brief:write` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   content: {
     [JSON_ERROR]: {
       example: {
@@ -322,7 +323,8 @@ export class ContentBriefController {
   @ApiResponse(RESPONSE_401)
   @ApiResponse({
     ...RESPONSE_403_WRITE,
-    description: 'Sem a permissão `content-brief:read` (`FORBIDDEN`)',
+    description:
+      'Sem a permissão `content-brief:read` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   })
   async findAll(
     @Query() query: ListContentBriefsQueryDto,
@@ -359,7 +361,8 @@ export class ContentBriefController {
   @ApiResponse(RESPONSE_401)
   @ApiResponse({
     ...RESPONSE_403_WRITE,
-    description: 'Sem a permissão `content-brief:read` (`FORBIDDEN`)',
+    description:
+      'Sem a permissão `content-brief:read` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   })
   async summarize(
     @Query() query: SummarizeContentBriefsQueryDto,
@@ -392,7 +395,8 @@ export class ContentBriefController {
   @ApiResponse(RESPONSE_401)
   @ApiResponse({
     ...RESPONSE_403_WRITE,
-    description: 'Sem a permissão `content-brief:read` (`FORBIDDEN`)',
+    description:
+      'Sem a permissão `content-brief:read` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   })
   @ApiResponse(RESPONSE_404)
   async findOneById(
@@ -499,7 +503,8 @@ export class ContentBriefController {
   @ApiResponse(RESPONSE_401)
   @ApiResponse({
     ...RESPONSE_403_WRITE,
-    description: 'Sem a permissão `content-brief:delete` (`FORBIDDEN`)',
+    description:
+      'Sem a permissão `content-brief:delete` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   })
   @ApiResponse(RESPONSE_404)
   async remove(

@@ -112,21 +112,22 @@ Definidos nesta base:
 
 Autenticação e usuários (catálogo e exemplos de resposta em [`docs/auth.md`](./docs/auth.md)):
 
-| `code`                     | Status | Quando                                                                             |
-| -------------------------- | ------ | ---------------------------------------------------------------------------------- |
-| `INVALID_CREDENTIALS`      | 401    | E-mail inexistente **ou** senha errada (mesma resposta e mesmo tempo)              |
-| `ACCOUNT_LOCKED`           | 403    | Conta bloqueada por excesso de tentativas de login                                 |
-| `USER_DEACTIVATED`         | 403    | Usuário desativado tentou entrar (depois de provar a senha) ou renovar a sessão    |
-| `INVALID_REFRESH_TOKEN`    | 401    | Refresh token desconhecido, expirado, revogado ou reutilizado                      |
-| `INVALID_CURRENT_PASSWORD` | 400    | Senha atual incorreta na troca de senha                                            |
-| `WEAK_PASSWORD`            | 400    | Senha fora de 10 a 128 caracteres, ou nova senha igual à atual                     |
-| `INVALID_USER_NAME`        | 400    | Nome do usuário vazio ou com mais de 120 caracteres                                |
-| `INVALID_EMAIL`            | 400    | E-mail do usuário (e do responsável) fora do formato ou com mais de 254 caracteres |
-| `USER_NOT_FOUND`           | 404    | Id de usuário inexistente                                                          |
-| `EMAIL_ALREADY_REGISTERED` | 409    | Já existe usuário com o mesmo e-mail (sem diferenciar caixa), ativo ou desativado  |
-| `USER_VERSION_OUTDATED`    | 409    | `version` do `PATCH /users/:id` diferente da atual                                 |
-| `LAST_ADMIN`               | 409    | A operação deixaria o sistema sem administrador ativo                              |
-| `CANNOT_MODIFY_SELF`       | 409    | Desativar ou mudar o papel da própria conta                                        |
+| `code`                     | Status | Quando                                                                                          |
+| -------------------------- | ------ | ----------------------------------------------------------------------------------------------- |
+| `INVALID_CREDENTIALS`      | 401    | E-mail inexistente **ou** senha errada (mesma resposta e mesmo tempo)                           |
+| `ACCOUNT_LOCKED`           | 403    | Conta bloqueada por excesso de tentativas de login                                              |
+| `USER_DEACTIVATED`         | 403    | Usuário desativado tentou entrar (depois de provar a senha) ou renovar a sessão                 |
+| `PASSWORD_CHANGE_REQUIRED` | 403    | Token de senha provisória (claim `mcp`) em rota que não é troca de senha, logout ou `user-info` |
+| `INVALID_REFRESH_TOKEN`    | 401    | Refresh token desconhecido, expirado, revogado ou reutilizado                                   |
+| `INVALID_CURRENT_PASSWORD` | 400    | Senha atual incorreta na troca de senha                                                         |
+| `WEAK_PASSWORD`            | 400    | Senha fora de 10 a 128 caracteres, ou nova senha igual à atual                                  |
+| `INVALID_USER_NAME`        | 400    | Nome do usuário vazio ou com mais de 120 caracteres                                             |
+| `INVALID_EMAIL`            | 400    | E-mail do usuário (e do responsável) fora do formato ou com mais de 254 caracteres              |
+| `USER_NOT_FOUND`           | 404    | Id de usuário inexistente                                                                       |
+| `EMAIL_ALREADY_REGISTERED` | 409    | Já existe usuário com o mesmo e-mail (sem diferenciar caixa), ativo ou desativado               |
+| `USER_VERSION_OUTDATED`    | 409    | `version` do `PATCH /users/:id` diferente da atual                                              |
+| `LAST_ADMIN`               | 409    | A operação deixaria o sistema sem administrador ativo                                           |
+| `CANNOT_MODIFY_SELF`       | 409    | Desativar ou mudar o papel da própria conta                                                     |
 
 Cadastros (empreendimentos e responsáveis):
 
@@ -171,7 +172,7 @@ Autenticação **própria** da API (ADR-016, substitui o provedor de identidade 
 | `user:read`                                            |   sim   |                        |                        |
 | `user:write` (criar, alterar, desativar, redefinir)    |   sim   |                        |                        |
 
-- **Guards** (`APP_GUARD`, nesta ordem): `ThrottlerGuard` -> `AuthGuard` -> `PermissionsGuard`. O `AuthGuard` valida o JWT **localmente** (assinatura HS256, `iss`, `aud`, `exp`) e carrega o usuário das claims, **sem consultar o banco por requisição**. Consequência: desativar um usuário ou mudar o papel dele só vale nos tokens novos, no máximo `JWT_ACCESS_TTL` (15 min) depois; o refresh e o login são negados na hora. Falha de autenticação: `401 UNAUTHENTICATED`, sempre a mesma mensagem; o motivo (`reason`: `token_missing`, `invalid_format`, `invalid_signature`, `expired`, `invalid_issuer`, `invalid_audience`, `invalid_claims`) vai só para o log `auth.guard.rejected`, nunca o token. Falta de permissão: `403 FORBIDDEN`.
+- **Guards** (`APP_GUARD`, nesta ordem): `ThrottlerGuard` -> `AuthGuard` -> `PermissionsGuard`. O `AuthGuard` valida o JWT **localmente** (assinatura HS256, `iss`, `aud`, `exp`) e carrega o usuário das claims, **sem consultar o banco por requisição**. Consequência: desativar um usuário ou mudar o papel dele só vale nos tokens novos, no máximo `JWT_ACCESS_TTL` (15 min) depois; o refresh e o login são negados na hora. Falha de autenticação: `401 UNAUTHENTICATED`, sempre a mesma mensagem; o motivo (`reason`: `token_missing`, `invalid_format`, `invalid_signature`, `expired`, `invalid_issuer`, `invalid_audience`, `invalid_claims`) vai só para o log `auth.guard.rejected`, nunca o token. Token com a claim `mcp` (senha provisória pendente, `mustChangePassword`) só passa nas rotas `@AllowPendingPasswordChange()` (`POST /auth/change-password`, `POST /auth/logout`, `GET /auth/user-info`); nas demais: `403 PASSWORD_CHANGE_REQUIRED`. Falta de permissão: `403 FORBIDDEN`.
 - **Nega por padrão:** toda rota declara `@Public()` (`/health`, login e refresh), `@Authenticated()` (só exige login) ou `@Permissions(...)` (exige todas). Rota sem nenhum dos três responde `403` e gera o log `auth.permissions.missing_decorator`.
 - **Segurança do login:** `INVALID_CREDENTIALS` único para e-mail inexistente e senha errada, com equalização de tempo (hash descartável quando o e-mail não existe); `LOGIN_MAX_ATTEMPTS` falhas seguidas bloqueiam a conta por `LOGIN_LOCK_MINUTES` (contagem atômica no banco, sucesso zera); `@LoginThrottle()` aplica `LOGIN_THROTTLE_LIMIT_PER_MINUTE` por IP em login e troca de senha; senha em argon2id (`argon2`, OWASP 19 MiB / 2 iterações / 1 de paralelismo); senha, hash e token nunca vão para log nem para resposta (as respostas que carregam segredo levam `Cache-Control: no-store`).
 - **Teste manual** (com `npm run seed:dev` e a API no ar):

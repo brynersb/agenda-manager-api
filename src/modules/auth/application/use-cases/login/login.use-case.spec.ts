@@ -88,6 +88,9 @@ describe('LoginUseCase', () => {
           permissions: ['content-brief:read', 'registry:read'],
         },
       });
+      expect(tokens.issueAccessToken).toHaveBeenCalledWith(
+        expect.objectContaining({ mustChangePassword: true }),
+      );
     });
 
     it('zera o contador de falhas e registra o último login', async () => {

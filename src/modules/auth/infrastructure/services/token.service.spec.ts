@@ -79,8 +79,50 @@ describe('TokenService', () => {
 
       expect(service.verifyAccessToken(token)).toEqual({
         ok: true,
-        claims: SUBJECT,
+        claims: { ...SUBJECT, mustChangePassword: false },
       });
+    });
+
+    it('omite a claim mcp quando mustChangePassword é falso ou ausente', () => {
+      for (const subject of [
+        SUBJECT,
+        { ...SUBJECT, mustChangePassword: false },
+      ]) {
+        const { token } = service.issueAccessToken(subject);
+
+        expect(jwt.decode(token)).not.toHaveProperty('mcp');
+        expect(service.verifyAccessToken(token)).toMatchObject({
+          ok: true,
+          claims: { mustChangePassword: false },
+        });
+      }
+    });
+
+    it('emite mcp: true com senha provisória pendente e a verificação devolve mustChangePassword', () => {
+      const { token } = service.issueAccessToken({
+        ...SUBJECT,
+        mustChangePassword: true,
+      });
+
+      expect(jwt.decode(token)).toMatchObject({ mcp: true });
+      expect(service.verifyAccessToken(token)).toEqual({
+        ok: true,
+        claims: { ...SUBJECT, mustChangePassword: true },
+      });
+    });
+
+    it('só trata mcp estritamente verdadeiro como pendência', () => {
+      const base = {
+        email: SUBJECT.email,
+        name: SUBJECT.name,
+        role: SUBJECT.role,
+      };
+
+      for (const mcp of ['true', 1, false, null]) {
+        expect(service.verifyAccessToken(sign({ ...base, mcp }))).toMatchObject(
+          { ok: true, claims: { mustChangePassword: false } },
+        );
+      }
     });
 
     it('expira depois do TTL', () => {

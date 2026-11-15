@@ -10,6 +10,7 @@ describe('toActor', () => {
         email: 'maria@x.test',
         role: Role.Editor,
         permissions: [],
+        mustChangePassword: false,
       }),
     ).toEqual({ id: 'u-1', name: 'Maria' });
   });

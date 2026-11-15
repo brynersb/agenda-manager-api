@@ -87,7 +87,8 @@ const RESPONSE_401 = {
 
 const RESPONSE_403_READ = {
   status: 403,
-  description: 'Sem a permissão `user:read` (`FORBIDDEN`)',
+  description:
+    'Sem a permissão `user:read` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
   content: {
     [JSON_ERROR]: {
       example: {
@@ -101,7 +102,8 @@ const RESPONSE_403_READ = {
 
 const RESPONSE_403_WRITE = {
   ...RESPONSE_403_READ,
-  description: 'Sem a permissão `user:write` (`FORBIDDEN`)',
+  description:
+    'Sem a permissão `user:write` (`FORBIDDEN`) ou senha provisória pendente (`PASSWORD_CHANGE_REQUIRED`)',
 };
 
 const RESPONSE_404 = {

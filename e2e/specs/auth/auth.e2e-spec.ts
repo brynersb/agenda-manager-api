@@ -4,8 +4,9 @@ import * as jwt from 'jsonwebtoken';
 
 import { Role } from '@/modules/auth/domain/enums/role';
 import { cleanDatabase } from '../../src/core/database';
-import { forgeAccessToken } from '../../src/core/tokens';
+import { forgeAccessToken, TOKENS } from '../../src/core/tokens';
 import {
+  type AuthSessionBody,
   CHANGE_PASSWORD_URL,
   createUser,
   E2E_PASSWORD,
@@ -17,6 +18,9 @@ import {
   USER_INFO_URL,
 } from '../../src/core/users';
 import { type AppE2e, bootstrapApp } from '../../src/runner/app-bootstrap';
+
+const CONTENT_BRIEFS_URL = '/api/v1/content-briefs';
+const USERS_URL = '/api/v1/users';
 
 type ErrorBody = {
   statusCode: number;
@@ -638,16 +642,37 @@ describe('Autenticação própria (e2e)', () => {
       body: { currentPassword: string; newPassword: string },
     ) => e2e.client.post<ErrorBody>(CHANGE_PASSWORD_URL, { token, body });
 
-    it('troca a senha: a antiga para de valer, a nova entra e mustChangePassword some', async () => {
+    it('troca a senha e devolve uma sessão nova: a antiga para de valer, a nova entra e mustChangePassword some', async () => {
       const user = await createUser(e2e, { mustChangePassword: true });
       const session = await loginAs(e2e, user);
 
-      const res = await change(session.accessToken, {
-        currentPassword: user.password,
-        newPassword: 'nova-senha-forte-456',
+      const res = await e2e.client.post<AuthSessionBody>(CHANGE_PASSWORD_URL, {
+        token: session.accessToken,
+        body: {
+          currentPassword: user.password,
+          newPassword: 'nova-senha-forte-456',
+        },
       });
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(res.body).toEqual({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String),
+        expiresIn: 900,
+        mustChangePassword: false,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          permissions: expect.any(Array),
+        },
+      });
+      expect(res.body.refreshToken).not.toBe(session.refreshToken);
+      expect(jwt.decode(res.body.accessToken)).not.toHaveProperty('mcp');
+      expect((await refresh(e2e, session.refreshToken)).status).toBe(401);
+      expect((await refresh(e2e, res.body.refreshToken)).status).toBe(200);
       expect(await login(e2e, user).then((r) => r.status)).toBe(401);
       const relogin = await login(e2e, {
         email: user.email,
@@ -749,6 +774,179 @@ describe('Autenticação própria (e2e)', () => {
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('USER_DEACTIVATED');
+    });
+  });
+
+  describe('senha provisória pendente (claim mcp)', () => {
+    const NEW_PASSWORD = 'minha-senha-definitiva-1';
+
+    const contentBriefs = (token: string) =>
+      e2e.client.get<ErrorBody>(CONTENT_BRIEFS_URL, { token });
+
+    /** Usuário criado pelo admin via API: nasce com senha provisória. */
+    async function createdByAdmin() {
+      const created = await e2e.client.post<{
+        user: { id: string; email: string };
+        temporaryPassword: string;
+      }>(USERS_URL, {
+        token: TOKENS.admin,
+        body: {
+          name: 'Maria Provisória',
+          email: 'provisoria@e2e.test',
+          role: 'content-brief-editor',
+        },
+      });
+      expect(created.status).toBe(201);
+      return {
+        id: created.body.user.id,
+        email: created.body.user.email,
+        password: created.body.temporaryPassword,
+      };
+    }
+
+    async function expectFullAccessAfterChange(
+      user: { email: string; password: string },
+      pending: AuthSessionBody,
+    ) {
+      const changed = await e2e.client.post<AuthSessionBody>(
+        CHANGE_PASSWORD_URL,
+        {
+          token: pending.accessToken,
+          body: {
+            currentPassword: user.password,
+            newPassword: NEW_PASSWORD,
+          },
+        },
+      );
+      expect(changed.status).toBe(200);
+      expect(changed.body.mustChangePassword).toBe(false);
+      expect(jwt.decode(changed.body.accessToken)).not.toHaveProperty('mcp');
+
+      expect((await contentBriefs(changed.body.accessToken)).status).toBe(200);
+      return changed.body;
+    }
+
+    it('usuário criado por POST /users: tudo é 403 PASSWORD_CHANGE_REQUIRED até trocar a senha', async () => {
+      const user = await createdByAdmin();
+      const pending = await loginAs(e2e, user);
+      expect(pending.mustChangePassword).toBe(true);
+      expect(jwt.decode(pending.accessToken)).toMatchObject({ mcp: true });
+
+      const blocked = await contentBriefs(pending.accessToken);
+
+      expect(blocked.status).toBe(403);
+      expect(blocked.body).toEqual({
+        statusCode: 403,
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'Troque a senha provisória para continuar.',
+      });
+
+      const info = await userInfo(pending.accessToken);
+      expect(info.status).toBe(200);
+      expect(info.body.id).toBe(user.id);
+
+      await expectFullAccessAfterChange(user, pending);
+    });
+
+    it('rotas de escrita e de outros módulos também ficam bloqueadas', async () => {
+      const user = await createdByAdmin();
+      const pending = await loginAs(e2e, user);
+
+      for (const [method, url] of [
+        ['get', '/api/v1/owners'],
+        ['get', '/api/v1/estate-developments'],
+        ['get', `${CONTENT_BRIEFS_URL}/summary`],
+        ['post', CONTENT_BRIEFS_URL],
+      ] as const) {
+        const res = await e2e.client[method]<ErrorBody>(url, {
+          token: pending.accessToken,
+          ...(method === 'post' ? { body: {} } : {}),
+        });
+        expect(res.status, `${method} ${url}`).toBe(403);
+        expect(res.body.code, `${method} ${url}`).toBe(
+          'PASSWORD_CHANGE_REQUIRED',
+        );
+      }
+    });
+
+    it('logout funciona com o token restrito e revoga o refresh token', async () => {
+      const user = await createdByAdmin();
+      const pending = await loginAs(e2e, user);
+
+      const res = await e2e.client.post(LOGOUT_URL, {
+        token: pending.accessToken,
+        body: { refreshToken: pending.refreshToken },
+      });
+
+      expect(res.status).toBe(204);
+      expect((await refresh(e2e, pending.refreshToken)).status).toBe(401);
+    });
+
+    it('o refresh de uma sessão pendente continua emitindo token restrito', async () => {
+      const user = await createdByAdmin();
+      const pending = await loginAs(e2e, user);
+
+      const renewed = await refresh(e2e, pending.refreshToken);
+
+      expect(renewed.status).toBe(200);
+      expect(renewed.body.mustChangePassword).toBe(true);
+      expect(jwt.decode(renewed.body.accessToken)).toMatchObject({ mcp: true });
+      expect((await contentBriefs(renewed.body.accessToken)).status).toBe(403);
+    });
+
+    it('depois da redefinição pelo admin vale a mesma restrição, até a troca', async () => {
+      const user = await createUser(e2e);
+      const reset = await e2e.client.post<{ temporaryPassword: string }>(
+        `${USERS_URL}/${user.id}/reset-password`,
+        { token: TOKENS.admin },
+      );
+      expect(reset.status).toBe(200);
+      const credentials = {
+        email: user.email,
+        password: reset.body.temporaryPassword,
+      };
+      const pending = await loginAs(e2e, credentials);
+      expect(pending.mustChangePassword).toBe(true);
+
+      expect((await contentBriefs(pending.accessToken)).status).toBe(403);
+      expect((await userInfo(pending.accessToken)).status).toBe(200);
+
+      await expectFullAccessAfterChange(credentials, pending);
+    });
+
+    it('um token antigo com mcp continua restrito depois da troca (esperado)', async () => {
+      const user = await createdByAdmin();
+      const pending = await loginAs(e2e, user);
+
+      await expectFullAccessAfterChange(user, pending);
+
+      const stale = await contentBriefs(pending.accessToken);
+      expect(stale.status).toBe(403);
+      expect(stale.body.code).toBe('PASSWORD_CHANGE_REQUIRED');
+    });
+
+    it('a senha atual errada na troca continua dando 400 e não libera o acesso', async () => {
+      const user = await createdByAdmin();
+      const pending = await loginAs(e2e, user);
+
+      const res = await e2e.client.post<ErrorBody>(CHANGE_PASSWORD_URL, {
+        token: pending.accessToken,
+        body: {
+          currentPassword: 'senha-errada-000',
+          newPassword: NEW_PASSWORD,
+        },
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('INVALID_CURRENT_PASSWORD');
+      expect((await contentBriefs(pending.accessToken)).status).toBe(403);
+    });
+
+    it('token sem senha provisória pendente acessa normalmente', async () => {
+      const user = await createUser(e2e);
+      const session = await loginAs(e2e, user);
+
+      expect((await contentBriefs(session.accessToken)).status).toBe(200);
     });
   });
 

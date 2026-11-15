@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 
 import { UserInfoResponseDto } from '@/modules/auth/infrastructure/http/dtos/user-info.response.dto';
 
-/** Resposta de `POST /auth/login` e `POST /auth/refresh`: um novo par de tokens. */
+/** Resposta de `POST /auth/login`, `POST /auth/refresh` e `POST /auth/change-password`: um novo par de tokens. */
 export class AuthSessionResponseDto {
   @ApiProperty({
     description:
@@ -26,7 +26,7 @@ export class AuthSessionResponseDto {
 
   @ApiProperty({
     description:
-      'Verdadeiro quando o usuário está com senha provisória e deve trocá-la (`POST /auth/change-password`)',
+      'Verdadeiro quando o usuário está com senha provisória e deve trocá-la (`POST /auth/change-password`). Nesse caso o access token carrega a claim `mcp` e só alcança `change-password`, `logout` e `user-info`; as demais rotas respondem 403 `PASSWORD_CHANGE_REQUIRED`',
     example: false,
   })
   mustChangePassword: boolean;

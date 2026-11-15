@@ -1,4 +1,7 @@
-import type { TokenServiceInterface } from '@/modules/auth/application/interfaces/token.service.interface';
+import type {
+  AccessTokenSubject,
+  TokenServiceInterface,
+} from '@/modules/auth/application/interfaces/token.service.interface';
 import { SessionIssuer } from '@/modules/auth/application/use-cases/common/session-issuer';
 import { RefreshTokenDomainEntity } from '@/modules/user/domain/entities/refresh-token.domain-entity';
 import {
@@ -20,7 +23,7 @@ export function fakeTokenService() {
   });
   return {
     refreshTtlSeconds: REFRESH_TTL_SECONDS,
-    issueAccessToken: vi.fn((subject: { id: string }) => ({
+    issueAccessToken: vi.fn((subject: AccessTokenSubject) => ({
       token: `access-for-${subject.id}`,
       expiresIn: 900,
     })),

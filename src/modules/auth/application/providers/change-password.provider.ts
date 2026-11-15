@@ -1,10 +1,15 @@
 import type { Provider } from '@nestjs/common';
 
+import {
+  TOKEN_SERVICE,
+  type TokenServiceInterface,
+} from '@/modules/auth/application/interfaces/token.service.interface';
 import { ChangePasswordUseCase } from '@/modules/auth/application/use-cases/change-password/change-password.use-case';
 import {
   CHANGE_PASSWORD_USE_CASE,
   type ChangePasswordUseCaseInterface,
 } from '@/modules/auth/application/use-cases/change-password/change-password.use-case.interface';
+import { SessionIssuer } from '@/modules/auth/application/use-cases/common/session-issuer';
 import {
   REFRESH_TOKEN_REPOSITORY,
   type RefreshTokenRepositoryInterface,
@@ -32,6 +37,7 @@ export const ChangePasswordProvider: Provider = {
     USER_REPOSITORY,
     REFRESH_TOKEN_REPOSITORY,
     PASSWORD_HASHER,
+    TOKEN_SERVICE,
     CLOCK,
     LOGGER_SERVICE,
   ],
@@ -39,8 +45,16 @@ export const ChangePasswordProvider: Provider = {
     users: UserRepositoryInterface,
     refreshTokens: RefreshTokenRepositoryInterface,
     hasher: PasswordHasherInterface,
+    tokens: TokenServiceInterface,
     clock: ClockInterface,
     logger: LoggerServiceInterface,
   ): ChangePasswordUseCaseInterface =>
-    new ChangePasswordUseCase(users, refreshTokens, hasher, clock, logger),
+    new ChangePasswordUseCase(
+      users,
+      refreshTokens,
+      hasher,
+      new SessionIssuer(tokens, refreshTokens, clock),
+      clock,
+      logger,
+    ),
 };

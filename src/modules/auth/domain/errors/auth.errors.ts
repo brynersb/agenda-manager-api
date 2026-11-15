@@ -18,6 +18,19 @@ export class ForbiddenAccessError extends ForbiddenError {
 }
 
 /**
+ * Token emitido com senha provisória pendente (claim `mcp`) só alcança as rotas
+ * `@AllowPendingPasswordChange()`; o front leva o usuário à tela de troca.
+ */
+export class PasswordChangeRequiredError extends ForbiddenError {
+  constructor() {
+    super(
+      'PASSWORD_CHANGE_REQUIRED',
+      'Troque a senha provisória para continuar.',
+    );
+  }
+}
+
+/**
  * E-mail inexistente e senha errada devolvem exatamente esta mesma resposta
  * (e gastam o mesmo tempo), para ninguém descobrir quais e-mails existem.
  */

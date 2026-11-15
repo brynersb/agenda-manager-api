@@ -87,6 +87,7 @@ export class SessionIssuer {
       email: user.email.value,
       name: user.name.value,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
     });
     return {
       accessToken: access.token,

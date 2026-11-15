@@ -27,22 +27,24 @@ Exemplos que mostram valores de segredo (senhas, tokens) usam placeholders. A se
 
 ## 2. Tabela de endpoints
 
-| Método e rota                    | Autenticação                 | Corpo                                | Sucesso                                      |
-| -------------------------------- | ---------------------------- | ------------------------------------ | -------------------------------------------- |
-| `POST /auth/login`               | pública (limite por IP)      | `{ email, password }`                | `200` sessão (seção 3.1)                     |
-| `POST /auth/refresh`             | pública                      | `{ refreshToken }`                   | `200` sessão nova (seção 3.2)                |
-| `POST /auth/logout`              | access token                 | `{ refreshToken }`                   | `204` sem corpo                              |
-| `POST /auth/change-password`     | access token (limite por IP) | `{ currentPassword, newPassword }`   | `204` sem corpo                              |
-| `GET /auth/user-info`            | access token                 | -                                    | `200 { id, email, name, role, permissions }` |
-| `GET /users`                     | `user:read`                  | query `q`, `status`, `page`, `limit` | `200` página de usuários                     |
-| `GET /users/:id`                 | `user:read`                  | -                                    | `200` usuário                                |
-| `POST /users`                    | `user:write`                 | `{ name, email, role, password? }`   | `201 { user, temporaryPassword }`            |
-| `PATCH /users/:id`               | `user:write`                 | `{ name?, role?, version }`          | `200` usuário                                |
-| `POST /users/:id/deactivate`     | `user:write`                 | -                                    | `200` usuário                                |
-| `POST /users/:id/reactivate`     | `user:write`                 | -                                    | `200` usuário                                |
-| `POST /users/:id/reset-password` | `user:write`                 | -                                    | `200 { user, temporaryPassword }`            |
+| Método e rota                    | Autenticação                      | Corpo                                | Sucesso                                      |
+| -------------------------------- | --------------------------------- | ------------------------------------ | -------------------------------------------- |
+| `POST /auth/login`               | pública (limite por IP)           | `{ email, password }`                | `200` sessão (seção 3.1)                     |
+| `POST /auth/refresh`             | pública                           | `{ refreshToken }`                   | `200` sessão nova (seção 3.2)                |
+| `POST /auth/logout`              | access token (\*)                 | `{ refreshToken }`                   | `204` sem corpo                              |
+| `POST /auth/change-password`     | access token (\*) (limite por IP) | `{ currentPassword, newPassword }`   | `200` **sessão nova** (seção 3.4)            |
+| `GET /auth/user-info`            | access token (\*)                 | -                                    | `200 { id, email, name, role, permissions }` |
+| `GET /users`                     | `user:read`                       | query `q`, `status`, `page`, `limit` | `200` página de usuários                     |
+| `GET /users/:id`                 | `user:read`                       | -                                    | `200` usuário                                |
+| `POST /users`                    | `user:write`                      | `{ name, email, role, password? }`   | `201 { user, temporaryPassword }`            |
+| `PATCH /users/:id`               | `user:write`                      | `{ name?, role?, version }`          | `200` usuário                                |
+| `POST /users/:id/deactivate`     | `user:write`                      | -                                    | `200` usuário                                |
+| `POST /users/:id/reactivate`     | `user:write`                      | -                                    | `200` usuário                                |
+| `POST /users/:id/reset-password` | `user:write`                      | -                                    | `200 { user, temporaryPassword }`            |
 
-Respostas que carregam segredo (`login`, `refresh`, criação de usuário, `reset-password`) levam `Cache-Control: no-store`.
+(\*) Rotas liberadas também para o token de **senha provisória pendente** (`mustChangePassword: true`): são as **únicas**. Todas as demais rotas protegidas respondem `403 PASSWORD_CHANGE_REQUIRED` a esse token (seção 3.4).
+
+Respostas que carregam segredo (`login`, `refresh`, `change-password`, criação de usuário, `reset-password`) levam `Cache-Control: no-store`.
 
 ## 3. Autenticação
 
@@ -80,13 +82,13 @@ Resposta `200`:
 }
 ```
 
-| Campo                | Significado                                                                                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `accessToken`        | JWT para o cabeçalho `Authorization: Bearer`                                                                                                                                                       |
-| `refreshToken`       | 43 caracteres base64url. Vale **uma única vez**: guarde só o mais recente                                                                                                                          |
-| `expiresIn`          | Validade do access token **em segundos** (padrão 900)                                                                                                                                              |
-| `mustChangePassword` | `true` quando a senha é provisória (usuário criado ou redefinido por um administrador, ou admin inicial). O front deve levar o usuário a `POST /auth/change-password` antes de qualquer outra tela |
-| `user`               | Identidade e permissões                                                                                                                                                                            |
+| Campo                | Significado                                                                                                                                                                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accessToken`        | JWT para o cabeçalho `Authorization: Bearer`                                                                                                                                                                                                                                            |
+| `refreshToken`       | 43 caracteres base64url. Vale **uma única vez**: guarde só o mais recente                                                                                                                                                                                                               |
+| `expiresIn`          | Validade do access token **em segundos** (padrão 900)                                                                                                                                                                                                                                   |
+| `mustChangePassword` | `true` quando a senha é provisória (usuário criado ou redefinido por um administrador, ou admin inicial). **A API impõe a troca**: o access token vem restrito (claim `mcp`) e só alcança `change-password`, `logout` e `user-info`; o front leva o usuário à tela de troca (seção 3.4) |
+| `user`               | Identidade e permissões                                                                                                                                                                                                                                                                 |
 
 Erros do login:
 
@@ -114,9 +116,9 @@ Erros:
 
 Exige o access token. Corpo `{ "refreshToken": "..." }`. Responde `204` e revoga a **família** do refresh token (as renovações dessa sessão). É **idempotente**: token desconhecido, já revogado ou de outro usuário também dá `204` e não faz nada. Outras sessões (outros dispositivos) do mesmo usuário continuam valendo. Se o access token já expirou, renove antes (`/auth/refresh`) ou simplesmente descarte os tokens no cliente.
 
-### 3.4 `POST /auth/change-password`
+### 3.4 `POST /auth/change-password` e a senha provisória
 
-Exige o access token. Requisição:
+Exige o access token (inclusive o **restrito** de quem está com senha provisória). Requisição:
 
 ```json
 {
@@ -125,7 +127,31 @@ Exige o access token. Requisição:
 }
 ```
 
-Responde `204`. Efeitos: grava a senha nova, limpa `mustChangePassword`, destrava a conta e **revoga todos os refresh tokens do usuário, inclusive o da sessão atual**. Depois do `204` o front **descarta os tokens e leva o usuário ao login** para entrar com a senha nova.
+Resposta `200`: **uma sessão nova, no mesmo formato do login** (`accessToken`, `refreshToken`, `expiresIn`, `mustChangePassword: false`, `user`), com `Cache-Control: no-store`:
+
+```json
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOi4uLn0.assinatura",
+  "refreshToken": "q1W2e3R4t5Y6u7I8o9P0aSdFgHjKlZxCvBnM1q2w3e4",
+  "expiresIn": 900,
+  "mustChangePassword": false,
+  "user": {
+    "id": "0192f6a0-7c1e-7a3b-9d52-4f1e8b6c2a10",
+    "email": "maria@bora.com.br",
+    "name": "Maria Souza",
+    "role": "content-brief-editor",
+    "permissions": [
+      "content-brief:read",
+      "content-brief:write",
+      "content-brief:delete",
+      "registry:read",
+      "registry:write"
+    ]
+  }
+}
+```
+
+Efeitos: grava a senha nova, limpa `mustChangePassword`, destrava a conta e **revoga todos os refresh tokens do usuário, inclusive o da sessão atual** (por isso a resposta traz uma sessão nova, de família nova, e o cliente continua logado). O front **substitui os dois tokens guardados pelos da resposta** (o refresh token antigo já não vale) e segue para o app, sem passar de novo pelo login. As demais sessões do usuário (outros dispositivos) caem e precisam entrar de novo.
 
 | Status | `code`                     | Quando                                                                                     |
 | ------ | -------------------------- | ------------------------------------------------------------------------------------------ |
@@ -136,7 +162,16 @@ Responde `204`. Efeitos: grava a senha nova, limpa `mustChangePassword`, destrav
 | 403    | `USER_DEACTIVATED`         | Usuário desativado (com access token ainda válido)                                         |
 | 429    | `TOO_MANY_REQUESTS`        | Limite por IP (o mesmo limite baixo do login)                                              |
 
-A API **não bloqueia** o uso das demais rotas enquanto `mustChangePassword` for `true`: quem impõe a troca é o front, com base no valor devolvido pelo login e pelo refresh.
+#### Fluxo da senha provisória (`PASSWORD_CHANGE_REQUIRED`)
+
+A senha provisória nasce quando um administrador cria o usuário (`POST /users`) ou o redefine (`POST /users/:id/reset-password`), e no admin inicial do bootstrap. **A API impede o uso do sistema até a troca**, não só o front:
+
+1. `POST /auth/login` (ou `/auth/refresh`) devolve `mustChangePassword: true` e um access token com a claim booleana **`mcp`** (must change password). A claim só existe quando verdadeira; o front pode usá-la, mas quem decide é a API.
+2. Com esse token, **toda rota protegida** responde `403` com `{ "statusCode": 403, "code": "PASSWORD_CHANGE_REQUIRED", "message": "Troque a senha provisória para continuar." }`, **exceto** `POST /auth/change-password`, `POST /auth/logout` e `GET /auth/user-info` (que continuam funcionando, por exemplo para exibir o nome na tela de troca ou sair).
+3. O front, ao ver `mustChangePassword: true` no login/refresh **ou** um `403 PASSWORD_CHANGE_REQUIRED` em qualquer chamada, leva o usuário à tela de troca de senha e **não** o trata como "sem permissão" nem como sessão expirada.
+4. `POST /auth/change-password` devolve a sessão nova (acima). Com o token novo (sem `mcp`) o usuário acessa tudo normalmente.
+5. **Um token antigo com `mcp` continua restrito** depois da troca (a decisão vem da claim, sem ir ao banco) até expirar, no máximo `JWT_ACCESS_TTL`; os refresh tokens antigos foram revogados. O front só deve usar a sessão devolvida pela troca.
+6. Um `refresh` de sessão ainda pendente devolve de novo `mustChangePassword: true` e token restrito.
 
 ### 3.5 `GET /auth/user-info`
 
@@ -160,7 +195,7 @@ Resposta `200`:
 }
 ```
 
-Lê só as claims do access token (sem ir ao banco): reflete nome e papel de **quando o token foi emitido**. Para ver o estado atual, renove a sessão. Os campos `sub` e `roles` do contrato antigo **não existem mais**.
+Lê só as claims do access token (sem ir ao banco): reflete nome e papel de **quando o token foi emitido**. Funciona também com o token de senha provisória pendente. Para ver o estado atual, renove a sessão. Os campos `sub` e `roles` do contrato antigo **não existem mais**.
 
 ## 4. Fluxo de tokens
 
@@ -183,10 +218,11 @@ Regras que a UI deve seguir:
 2. **Serialize as renovações.** Duas chamadas simultâneas de `refresh` com o mesmo token são tratadas como reuso: uma vence e a outra recebe `401 INVALID_REFRESH_TOKEN`, **e a família inteira é revogada** (o usuário precisa entrar de novo). Use um único "voo" de refresh no cliente (promessa compartilhada) e reaproveite o resultado nas chamadas que esperam.
 3. Ao receber `401 UNAUTHENTICATED` numa rota de negócio: tente **uma** renovação; se der certo, repita a chamada; se der `401 INVALID_REFRESH_TOKEN` ou `403 USER_DEACTIVATED`, descarte os tokens e vá ao login.
 4. Os 401 de `login` (`INVALID_CREDENTIALS`) não disparam renovação.
-5. **Access token:** JWT HS256, TTL `JWT_ACCESS_TTL` (padrão 15 min). Claims: `sub` (uuid do usuário), `email`, `name`, `role`, `iss` (`JWT_ISSUER`, padrão `pauta-mkt-api`), `aud` (`JWT_AUDIENCE`, padrão `pauta-mkt`), `iat`, `exp`. **O token não carrega permissões**: o servidor as deriva do `role`. O front pode ler as claims para exibir nome e e-mail, mas não deve confiar nelas para autorizar (quem autoriza é a API).
+5. **Access token:** JWT HS256, TTL `JWT_ACCESS_TTL` (padrão 15 min). Claims: `sub` (uuid do usuário), `email`, `name`, `role`, `mcp` (booleana, **só presente quando `true`**: senha provisória pendente, ver seção 3.4), `iss` (`JWT_ISSUER`, padrão `pauta-mkt-api`), `aud` (`JWT_AUDIENCE`, padrão `pauta-mkt`), `iat`, `exp`. **O token não carrega permissões**: o servidor as deriva do `role`. O front pode ler as claims para exibir nome e e-mail, mas não deve confiar nelas para autorizar (quem autoriza é a API).
 6. **Refresh token:** opaco (256 bits aleatórios, base64url), gravado na API só como hash SHA-256. Vale `JWT_REFRESH_TTL` (padrão 7 dias) **desde a emissão de cada um** (a renovação reinicia o prazo) e **uma única vez**.
 7. **Janela de efeito de desativar/rebaixar usuário.** O guard valida o JWT localmente e não consulta o banco a cada requisição. Por isso **desativar um usuário ou mudar o papel dele vale nos tokens novos, no máximo até o access token expirar (15 min)**. Ao desativar, a API revoga os refresh tokens e nega login e refresh na hora; o access token já emitido continua aceito até expirar. Mudança de papel aparece no próximo `refresh`/login.
-8. Trocar ou redefinir a senha **revoga todos os refresh tokens** do usuário (todas as sessões).
+8. Trocar ou redefinir a senha **revoga todos os refresh tokens** do usuário (todas as sessões). Na troca pelo próprio usuário a resposta já traz a sessão nova (seção 3.4); na redefinição pelo administrador o usuário entra de novo com a senha provisória.
+9. Com `mustChangePassword: true` (claim `mcp`), as rotas de negócio respondem `403 PASSWORD_CHANGE_REQUIRED` até a troca de senha (seção 3.4).
 
 ## 5. Administração de usuários
 
@@ -328,6 +364,7 @@ Formato único (o mesmo da API toda): `{ "statusCode": 401, "code": "INVALID_CRE
 | `INVALID_REFRESH_TOKEN`    | 401    | Sessão inválida ou expirada. Entre novamente.                                                            |
 | `ACCOUNT_LOCKED`           | 403    | Conta bloqueada por excesso de tentativas. Tente novamente em N minutos.                                 |
 | `USER_DEACTIVATED`         | 403    | Usuário desativado. Procure um administrador.                                                            |
+| `PASSWORD_CHANGE_REQUIRED` | 403    | Troque a senha provisória para continuar.                                                                |
 | `INVALID_CURRENT_PASSWORD` | 400    | A senha atual não confere.                                                                               |
 | `WEAK_PASSWORD`            | 400    | A senha deve ter entre 10 e 128 caracteres. (ou: A nova senha deve ser diferente da atual.)              |
 | `INVALID_USER_NAME`        | 400    | O nome deve ter entre 1 e 120 caracteres                                                                 |
@@ -340,7 +377,7 @@ Formato único (o mesmo da API toda): `{ "statusCode": 401, "code": "INVALID_CRE
 | `CANNOT_MODIFY_SELF`       | 409    | Você não pode desativar nem alterar o papel da sua própria conta.                                        |
 | `TOO_MANY_REQUESTS`        | 429    | Muitas requisições. Tente novamente em instantes.                                                        |
 
-Atenção para o front: `ACCOUNT_LOCKED` e `USER_DEACTIVATED` são `403`, mas **não** significam "sem permissão para a tela": trate-os pelo `code` na tela de login. `403 FORBIDDEN` (sem permissão) é o único `403` que leva à página de acesso negado.
+Atenção para o front: `ACCOUNT_LOCKED`, `USER_DEACTIVATED` e `PASSWORD_CHANGE_REQUIRED` são `403`, mas **não** significam "sem permissão para a tela": trate `ACCOUNT_LOCKED` e `USER_DEACTIVATED` pelo `code` na tela de login e `PASSWORD_CHANGE_REQUIRED` levando o usuário à troca de senha. `403 FORBIDDEN` (sem permissão) é o único `403` que leva à página de acesso negado.
 
 ## 7. Segurança do login (para quem opera)
 
@@ -367,6 +404,17 @@ curl -s $API/auth/user-info -H "authorization: Bearer $TOKEN"
 # criar usuário com senha provisória gerada (anote: só aparece uma vez)
 curl -s -X POST $API/users -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"name":"Maria Souza","email":"maria@bora.com.br","role":"content-brief-editor"}'
+
+# primeiro acesso da Maria: o token vem restrito (mustChangePassword: true)
+curl -s -X POST $API/auth/login -H 'content-type: application/json' \
+  -d '{"email":"maria@bora.com.br","password":"<senha provisória>"}' | tee /tmp/maria.json
+MARIA=$(jq -r .accessToken /tmp/maria.json)
+curl -s $API/content-briefs -H "authorization: Bearer $MARIA"
+# 403 {"statusCode":403,"code":"PASSWORD_CHANGE_REQUIRED","message":"Troque a senha provisória para continuar."}
+
+# troca de senha: devolve a sessão nova (mustChangePassword: false) e libera o resto
+curl -s -X POST $API/auth/change-password -H "authorization: Bearer $MARIA" -H 'content-type: application/json' \
+  -d '{"currentPassword":"<senha provisória>","newPassword":"minha-senha-nova-forte"}'
 
 # renovar a sessão (o refresh token antigo deixa de valer)
 curl -s -X POST $API/auth/refresh -H 'content-type: application/json' -d "{\"refreshToken\":\"$REFRESH\"}"

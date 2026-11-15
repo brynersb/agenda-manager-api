@@ -13,6 +13,8 @@ export type AuthenticatedUser = {
   email: string;
   role: Role;
   permissions: Permission[];
+  /** Claim `mcp` do token: senha provisória pendente (o `AuthGuard` restringe as rotas). */
+  mustChangePassword: boolean;
 };
 
 /** Quem executa a ação, no formato que os use cases gravam na auditoria. */

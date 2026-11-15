@@ -1,3 +1,5 @@
+import type { AuthSession } from '@/modules/auth/application/types/auth-session';
+import type { SessionIssuer } from '@/modules/auth/application/use-cases/common/session-issuer';
 import {
   InvalidCurrentPasswordError,
   UnauthenticatedError,
@@ -17,22 +19,23 @@ import type {
 
 /**
  * Troca a senha do próprio usuário. Exige a senha atual, aplica a política e
- * proíbe repetir a senha atual. Limpa `mustChangePassword` e **revoga todos os
- * refresh tokens** do usuário (inclusive o desta sessão: o cliente entra de
- * novo com a senha nova).
+ * proíbe repetir a senha atual. Limpa `mustChangePassword`, **revoga todos os
+ * refresh tokens** do usuário (inclusive o desta sessão) e devolve uma sessão
+ * nova (família nova, access token sem `mcp`), para o cliente seguir logado.
  */
 export class ChangePasswordUseCase implements ChangePasswordUseCaseInterface {
   constructor(
     private readonly users: UserRepositoryInterface,
     private readonly refreshTokens: RefreshTokenRepositoryInterface,
     private readonly hasher: PasswordHasherInterface,
+    private readonly sessions: SessionIssuer,
     private readonly clock: ClockInterface,
     private readonly logger: LoggerServiceInterface,
   ) {
     this.logger.setLogPrefix(ChangePasswordUseCase.name);
   }
 
-  async execute(input: ChangePasswordInput): Promise<void> {
+  async execute(input: ChangePasswordInput): Promise<AuthSession> {
     const user = await this.users.findById(input.userId);
     if (!user) {
       throw new UnauthenticatedError();
@@ -71,6 +74,11 @@ export class ChangePasswordUseCase implements ChangePasswordUseCaseInterface {
       outcome: 'success',
       user_id: user.id,
       tags: ['auth', 'security'],
+    });
+
+    return this.sessions.open(user, {
+      userAgent: input.userAgent,
+      ip: input.ip,
     });
   }
 }

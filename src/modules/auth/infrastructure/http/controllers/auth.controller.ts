@@ -39,6 +39,7 @@ import {
   REFRESH_TOKEN_USE_CASE,
   type RefreshTokenUseCaseInterface,
 } from '@/modules/auth/application/use-cases/refresh-token/refresh-token.use-case.interface';
+import { AllowPendingPasswordChange } from '@/modules/auth/infrastructure/http/decorators/allow-pending-password-change.decorator';
 import { Authenticated } from '@/modules/auth/infrastructure/http/decorators/authenticated.decorator';
 import { CurrentUser } from '@/modules/auth/infrastructure/http/decorators/current-user.decorator';
 import { LoginThrottle } from '@/modules/auth/infrastructure/http/decorators/login-throttle.decorator';
@@ -243,6 +244,7 @@ export class AuthController {
 
   @Post('logout')
   @Authenticated()
+  @AllowPendingPasswordChange()
   @ApiBearerAuth('bearer')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
@@ -265,15 +267,22 @@ export class AuthController {
 
   @Post('change-password')
   @Authenticated()
+  @AllowPendingPasswordChange()
   @LoginThrottle()
   @ApiBearerAuth('bearer')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
+  @Header('Cache-Control', NO_STORE)
   @ApiOperation({
     summary: 'Trocar a própria senha',
     description:
-      'Exige a senha atual. Limpa `mustChangePassword` e **revoga todos os refresh tokens** do usuário, inclusive o da sessão atual: depois do 204 o cliente deve entrar de novo com a senha nova.',
+      'Exige a senha atual. Limpa `mustChangePassword` e **revoga todos os refresh tokens** do usuário, inclusive o da sessão atual, e **devolve uma sessão nova** (mesmo formato do login, com `mustChangePassword: false` e access token sem a restrição): o cliente troca os tokens guardados pelos novos e segue logado. Rota liberada para quem ainda está com a senha provisória (`PASSWORD_CHANGE_REQUIRED` nas demais).',
   })
-  @ApiResponse({ status: 204, description: 'Senha alterada' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Senha alterada; sessão nova (tokens, `mustChangePassword: false` e usuário)',
+    type: AuthSessionResponseDto,
+  })
   @ApiResponse({
     status: 400,
     description:
@@ -317,22 +326,27 @@ export class AuthController {
   async changeOwnPassword(
     @Body() body: ChangePasswordRequestDto,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<void> {
-    await this.changePassword.execute({
-      userId: user.id,
-      currentPassword: body.currentPassword,
-      newPassword: body.newPassword,
-    });
+    @Req() request: Request,
+  ): Promise<AuthSessionResponseDto> {
+    return toAuthSessionResponse(
+      await this.changePassword.execute({
+        userId: user.id,
+        currentPassword: body.currentPassword,
+        newPassword: body.newPassword,
+        ...sessionContextOf(request),
+      }),
+    );
   }
 
   @Get('user-info')
   @Authenticated()
+  @AllowPendingPasswordChange()
   @ApiBearerAuth('bearer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Identidade e permissões do usuário autenticado',
     description:
-      'Fonte única de permissões do front. Lê só as claims do access token (sem ir ao banco): reflete o papel de quando o token foi emitido.',
+      'Fonte única de permissões do front. Lê só as claims do access token (sem ir ao banco): reflete o papel de quando o token foi emitido. Liberada para quem ainda está com a senha provisória.',
   })
   @ApiResponse({
     status: 200,

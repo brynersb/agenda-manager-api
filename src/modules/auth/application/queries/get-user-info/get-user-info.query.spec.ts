@@ -12,6 +12,7 @@ describe('GetUserInfoQuery', () => {
       email: 'l@x.test',
       role: Role.Viewer,
       permissions: [Permission.ContentBriefDelete, Permission.UserWrite],
+      mustChangePassword: false,
     });
 
     expect(info).toEqual({
@@ -30,6 +31,7 @@ describe('GetUserInfoQuery', () => {
       email: 'a@x.test',
       role: Role.Admin,
       permissions: [],
+      mustChangePassword: false,
     });
 
     expect(info.permissions).toEqual(Object.values(Permission));
